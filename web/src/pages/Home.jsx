@@ -4,9 +4,19 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import PointCloudHead from '../components/PointCloudHead.jsx'
 import Starfield from '../components/Starfield.jsx'
+import GlassesTuner from '../components/GlassesTuner.jsx'
+
+// 개발용 안경 정렬 튜너 표시 여부.
+const DEV_TUNE = true
 
 export default function Home() {
   const [playing, setPlaying] = useState(false)
+  const [glassesTune, setGlassesTune] = useState({
+    // 안경 변환(확정값)
+    px: 0, py: 0.31, pz: 0.255, scale: 0.77, rx: -0.052, ry: 3.138, rz: 0.008,
+    // 강조도(확정값)
+    headCount: 49000, headSize: 0.009, headBright: 0.65, glassGlow: 3.0,
+  })
   const navigate = useNavigate()
 
   // 인트로 시퀀스가 끝나면 시뮬레이션으로 이동
@@ -40,7 +50,7 @@ export default function Home() {
       >
         <Starfield />
         <Suspense fallback={null}>
-          <PointCloudHead playing={playing} />
+          <PointCloudHead playing={playing} tune={DEV_TUNE ? glassesTune : undefined} />
         </Suspense>
         {/* 드래그 회전 + 휠 줌. 인트로 재생 중엔 언마운트해 카메라 연출과 충돌 방지 */}
         {!playing && (
@@ -54,6 +64,11 @@ export default function Home() {
           />
         )}
       </Canvas>
+
+      {/* 개발용 안경 튜너 (인트로 재생 전에만) */}
+      {DEV_TUNE && !playing && (
+        <GlassesTuner tune={glassesTune} onChange={setGlassesTune} />
+      )}
 
       {/* 상단 브랜드 */}
       <span className="hero-ui absolute left-6 top-6 z-10 font-display text-lg font-bold tracking-tight sm:left-8 sm:top-7">

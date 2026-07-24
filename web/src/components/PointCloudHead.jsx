@@ -1,8 +1,9 @@
-import { useMemo, useRef } from 'react'
+import { Suspense, useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree, useLoader } from '@react-three/fiber'
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { MeshSurfaceSampler } from 'three/examples/jsm/math/MeshSurfaceSampler.js'
+import Glasses from './Glasses.jsx'
 
 // ── 스캔 머리 정규화 (실측 미터 → 씬 스케일) ──
 // Head.obj bbox: x[-0.118,0.117] y[0.057,0.397] z[-0.072,0.148]
@@ -11,8 +12,11 @@ const SCALE = 4.9 // 머리 높이 0.34m → 약 1.68 유닛
 const Y_OFFSET = 0.0 // 세로 위치 미세 조정
 const ROT_Y = 0.0 // 얼굴 방향이 뒤를 보면 Math.PI 로
 
-// 머리 점 개수(스캔 룩: 조밀하게)
-const HEAD_POINTS = 90000
+// 머리 점 개수(스캔 룩: 조밀하게) — 실제 표시는 HEAD_COUNT 로 drawRange 조절
+const HEAD_POINTS = 90000 // 샘플링(빌드) 최대 개수
+const HEAD_COUNT = 49000 // 표시 개수(강조도) — 튜너로 확정
+const HEAD_SIZE = 0.009 // 점 크기 — 튜너로 확정
+const HEAD_BRIGHT = 0.65 // 밝기 배수(0~1, 낮을수록 덜 강조) — 튜너로 확정
 
 // 색 그라디언트용 깊이 기준
 const C = 0.64
@@ -84,7 +88,7 @@ function buildGeometry(headMesh) {
 
 const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2)
 
-export default function PointCloudHead({ playing }) {
+export default function PointCloudHead({ playing, tune }) {
   const group = useRef()
   const t0 = useRef(null)
   const { camera } = useThree()
@@ -99,6 +103,16 @@ export default function PointCloudHead({ playing }) {
     })
     return buildGeometry(mesh)
   }, [obj])
+
+  // 강조도 파라미터: 튜너가 있으면 그 값, 없으면 상수
+  const headCount = tune ? tune.headCount : HEAD_COUNT
+  const headSize = tune ? tune.headSize : HEAD_SIZE
+  const headBright = tune ? tune.headBright : HEAD_BRIGHT
+
+  // 개수 조절: 리샘플링 없이 drawRange 로 표시 점 수만 자름
+  useEffect(() => {
+    pointsGeo.setDrawRange(0, Math.min(headCount, HEAD_POINTS))
+  }, [pointsGeo, headCount])
 
   const START_ROT = 0.2 // 거의 정면에서 살짝 돌아봄
 
@@ -135,15 +149,22 @@ export default function PointCloudHead({ playing }) {
         />
       </mesh>
       <points geometry={pointsGeo}>
+        {/* 밝기는 material.color 그레이스케일 배수로(vertexColors × color) →
+            opacity로 낮추면 alphaTest에 걸려 점이 사라지므로 색으로 감광 */}
         <pointsMaterial
-          size={0.014}
+          size={headSize}
           map={dot}
           sizeAttenuation
           vertexColors
+          color={[headBright, headBright, headBright]}
           alphaTest={0.5}
           depthWrite
         />
       </points>
+      {/* 스마트글래스: 머리 그룹 안이라 유휴 회전·인트로 줌에 함께 참여 */}
+      <Suspense fallback={null}>
+        <Glasses tune={tune} />
+      </Suspense>
     </group>
   )
 }
