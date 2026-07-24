@@ -1,111 +1,99 @@
-:root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+@import 'tailwindcss';
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+/* ── 디자인 토큰 (Keynote 감성) ──────────────────────────────
+   크림 배경 · 잉크 블랙 · 전기 블루 포인트.
+   Tailwind v4의 @theme → bg-cream / text-ink / font-display 등 유틸 자동 생성 */
+@theme {
+  --color-cream: #f6f3ec;
+  --color-cream-deep: #ece7db;
+  --color-ink: #17140e;
+  --color-ink-soft: #58524733;
+  --color-accent: #2b4bff;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* 다크 히어로 팔레트 */
+  --color-navy: #0b1b26;
+  --color-navy-deep: #06121a;
+  --color-sky: #2da9ef;
+  --color-sky-bright: #56c2ff;
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 body {
   margin: 0;
+  background-color: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
 }
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
+/* 대문자 모노 라벨 (01 — SPEAKERS 같은 conference 모티프) */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+/* ── 다크 히어로: HUD 칩 / 애니메이션 ────────────────────── */
+.hud-chip {
+  background: rgba(6, 18, 26, 0.72);
+  border: 1px solid rgba(45, 169, 239, 0.35);
+  border-radius: 12px;
+  padding: 0.55rem 0.8rem;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4);
 }
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-10px); }
 }
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
+.animate-float      { animation: floaty 5s ease-in-out infinite; }
+.animate-float-slow { animation: floaty 7.5s ease-in-out infinite; }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+@keyframes glowpulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.8; }
 }
+.glow-pulse { animation: glowpulse 4.5s ease-in-out infinite; }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+/* ── 시네마틱 인트로 ────────────────────────────────────── */
+.stage      { transform-origin: 50% 40%; will-change: transform; }
+.fig-front  { opacity: 0; }
+.bloom      { opacity: 0; }
+
+/* 네온 글래스 은은한 숨쉬기 (대기 상태) */
+@keyframes neon-breathe {
+  0%, 100% { opacity: 0.9; }
+  50%      { opacity: 1; }
 }
+.neon-breathe { animation: neon-breathe 3.5s ease-in-out infinite; }
+
+/* 시작 버튼을 누르면 재생되는 시퀀스 */
+@keyframes turn-out { 0% { opacity: 1; } 20% { opacity: 0; } 100% { opacity: 0; } }
+@keyframes turn-in  { 0% { opacity: 0; } 12% { opacity: 0; } 34% { opacity: 1; } 100% { opacity: 1; } }
+@keyframes push-in {
+  0%   { transform: scale(1); }
+  18%  { transform: scale(1.08); }
+  100% { transform: scale(14); opacity: 0; }
+}
+@keyframes bloom-in { 0%, 50% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes ui-out   { 0% { opacity: 1; } 16% { opacity: 0; } 100% { opacity: 0; } }
+
+.hero.playing .stage      { animation: push-in 2.2s cubic-bezier(0.66, 0, 0.86, 0.2) forwards; }
+.hero.playing .fig-profile { animation: turn-out 2.2s ease forwards; }
+.hero.playing .fig-front   { animation: turn-in 2.2s ease forwards; }
+.hero.playing .hero-ui     { animation: ui-out 2.2s ease forwards; }
+.hero.playing .bloom       { animation: bloom-in 2.2s ease-in forwards; }
+
+/* 시뮬레이션 진입 시 밝은 화면에서 서서히 드러남 */
+@keyframes sim-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+.sim-flash { animation: sim-flash 0.9s ease-out forwards; }
