@@ -9,38 +9,55 @@
 
 ## 실행
 
+통합 서버(`server/main.py`)에 포함되어 있으므로 서버 실행 방법은 [server/README.md](../../README.md)와 같다.
+
+```bash
+cd server
+pip install -r requirements.txt
+cp .env.example .env             # 키 입력 (CLOVA_SPEECH_SECRET, CLOVA_SPEECH_INVOKE_URL), windows는 copy
+uvicorn main:app --reload
+```
+
+`nest.proto`를 수정했을 때만 생성물 재빌드:
+
 ```bash
 cd server/modules/stt
-python -m venv venv
-venv\Scripts\activate            # Windows
-pip install -r requirements.txt
-copy .env.example .env           # 키 입력 (CLOVA_SPEECH_SECRET, CLOVA_SPEECH_INVOKE_URL)
 python -m grpc_tools.protoc --proto_path=. --python_out=. --grpc_python_out=. nest.proto
-uvicorn ws_server:app --host 0.0.0.0 --port 5001
 ```
 
 ---
 
 ## 1. 내 명령 인식 — 실시간 스트리밍 (gRPC)
 
-- WebSocket: `ws://<서버>:5001/ws/stt?lang=ko`  (lang: `ko`(기본) / `en` / `ja`)
+- WebSocket: `ws://<서버>:8000/stt/ws?language=ko`
+  - `language`: `ko`(기본) / `en` / `ja`
+  - `origin`: 현재 위치(도로명 주소 또는 상호명) — 길찾기 출발지로 사용
+  - `execute`: `true`(기본)면 명령어 감지 시 기능(map 등)까지 실행해서 결과도 보냄
 - 입력: 바이너리 프레임 = 16kHz·모노·16bit PCM 오디오 청크, 종료는 `{"action":"stop"}`
-- 출력(표준 JSON):
+- 출력: 모두 공통 포맷 [`BaseResponse`](../../schemas/base.py)로 감싼 JSON
 
 ```jsonc
-{ "type": "partial", "text": "안녕하세" }              // 중간 자막(갱신)
-{ "type": "final",   "text": "안녕하세요" }            // 최종 문장(침묵 시 확정)
-{ "type": "wake",    "feature": "translate" }          // 기능 호출 (translate|navigate|qa|exchange)
+{ "status": 200, "msg": "success", "data": { "type": "partial", "text": "경복궁까지" } }        // 중간 자막(갱신)
+{ "status": 200, "msg": "success", "data": { "type": "final", "text": "경복궁까지 안내해줘" } }  // 최종 문장(침묵 시 확정)
+{ "status": 200, "msg": "success", "data": { "type": "wake", "text": "...", "feature": "navigate" } }  // 기능 감지
+{ "status": 200, "msg": "success", "data": { "feature": "navigate", "text": "...", "data": { ... } } } // 기능 실행 결과
 ```
+
+- `data.type`이 있으면 인식 이벤트, `data.feature`가 있으면 기능 실행 결과다.
 
 | 형식 | 소비하는 쪽 |
 |---|---|
 | partial / final | ① 자막, ③ LLM 입력 |
 | wake | 키워드 라우터 → 기능 실행 |
 
+클라이언트가 쓰는 경로는 이 WebSocket 하나다. 명령어 판별·기능 실행은 서버 내부에서 처리한다
+([`service.py`](service.py) → [`server/service.py`](../../service.py) → 기능 모듈).
+
 ## 2. 상대 대화 인식 — 장문 REST (한/영 자동)
 
-- `POST /api/dialog-stt` — 오디오 파일(multipart, 필드명 `audio`) → `{"text":"..."}`
+> 현재 엔드포인트 미연결 상태. 인식 함수(`long_stt.recognize_bytes`)만 있고, `service.py`/`router.py`에 아직 붙이지 않았다.
+
+- `POST /stt/dialog` (예정) — 오디오 파일(multipart, 필드명 `audio`) → `{"text":"..."}`
 - 한/영 동시 인식(`enko`) 사용 → 상대가 한국어/영어 섞어 말해도 자동 인식
 - 반환된 `text`는 ③(LLM)이 번역
 - 언어값 참고: `enko`(한/영) · `ko-KR` · `en-US` · `ja` · `zh-cn` · `zh-tw`
@@ -64,16 +81,14 @@ uvicorn ws_server:app --host 0.0.0.0 --port 5001
 
 | 파일 | 역할 |
 |---|---|
+| `service.py` | 모듈 진입점 — 실시간 명령어 인식 세션(`CommandSession`), 명령어 판별(`detect_command`) |
 | `stt_session.py` | 실시간 STT 재사용 세션(gRPC) |
-| `ws_server.py` | WebSocket + `/api/dialog-stt` 서버 |
 | `long_stt.py` | 장문 REST 인식(한/영 enko) |
 | `keyword_spotter.py` | 키워드 → 기능 매핑 |
 | `nest.proto`, `nest_pb2*.py` | CLOVA Speech gRPC 정의/생성물 |
-| `spike.py`, `mic 계열`, `record.py`, `rest_test.py` | 검증용 스크립트 |
-| `test.html` | 모듈 동작 확인용 데모 페이지(실제 UI는 `/web`) |
 
 ## 협업 규칙
 
 - 브랜치 `yc/stt` → PR
-- `.env`(실제 키)·`sample.wav`·`venv` 커밋 금지 (`.gitignore` 처리됨)
+- `server/.env`(실제 키)·`sample.wav`·`venv` 커밋 금지 (`.gitignore` 처리됨)
 - 공유 키는 팀 내부 채널로만 전달
