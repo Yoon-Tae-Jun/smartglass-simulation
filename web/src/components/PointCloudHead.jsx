@@ -14,9 +14,9 @@ const ROT_Y = 0.0 // 얼굴 방향이 뒤를 보면 Math.PI 로
 
 // 머리 점 개수(스캔 룩: 조밀하게) — 실제 표시는 HEAD_COUNT 로 drawRange 조절
 const HEAD_POINTS = 90000 // 샘플링(빌드) 최대 개수
-const HEAD_COUNT = 49000 // 표시 개수(강조도) — 튜너로 확정
-const HEAD_SIZE = 0.009 // 점 크기 — 튜너로 확정
-const HEAD_BRIGHT = 0.65 // 밝기 배수(0~1, 낮을수록 덜 강조) — 튜너로 확정
+const HEAD_COUNT = 67000 // 표시 개수(강조도) — 튜너로 확정
+const HEAD_SIZE = 0.007 // 점 크기 — 튜너로 확정
+const HEAD_BRIGHT = 0.60 // 밝기 배수(0~1, 낮을수록 덜 강조) — 튜너로 확정
 
 // 색 그라디언트용 깊이 기준
 const C = 0.64
@@ -92,6 +92,7 @@ export default function PointCloudHead({ playing, tune }) {
   const group = useRef()
   const t0 = useRef(null)
   const { camera } = useThree()
+  const controls = useThree((s) => s.controls)
 
   const obj = useLoader(OBJLoader, '/head/Head.obj')
   const dot = useMemo(() => makeDotTexture(), [])
@@ -114,7 +115,27 @@ export default function PointCloudHead({ playing, tune }) {
     pointsGeo.setDrawRange(0, Math.min(headCount, HEAD_POINTS))
   }, [pointsGeo, headCount])
 
-  const START_ROT = 0.2 // 거의 정면에서 살짝 돌아봄
+  // 시선타깃은 머리 중심에 고정, 카메라 위치(camX/Y/Z)만 튜너로 이동 → 카메라가 머리를
+  // 어느 방향에서 보는지(각도)를 조절. 값이 바뀔 때만 반영 → 슬라이더 사이엔 드래그 유지.
+  const HEAD_LOOK_Y = 0.1 // 머리 중심 높이(시선타깃)
+  const camX = tune ? tune.camX : -0.77
+  const camY = tune ? tune.camY : 0.46
+  const camZ = tune ? tune.camZ : 0.6
+  useEffect(() => {
+    if (playing || !controls) return
+    camera.position.set(camX, camY, camZ)
+    controls.target.set(0, HEAD_LOOK_Y, 0)
+    controls.update()
+  }, [camera, controls, playing, camX, camY, camZ])
+
+  const START_ROT = -Math.PI / 2 // 시작은 왼쪽 옆모습(왼쪽 귀가 카메라 향함) → 클릭 시 정면
+
+  // 시작 시선은 머리 중심. 클릭하면 좌상단 카메라 → 정면·안경 중심으로 이동.
+  const startLookX = 0
+  const startLookY = HEAD_LOOK_Y
+  // 인트로 종료 시 안경을 화면 중앙에 크게: 안경 높이(≈GLASSES_POS.y)로 시선/카메라를 맞춤
+  const GLASSES_Y = 0.31
+  const endCamZ = tune ? tune.endZ : 0.85 // 안경 클로즈업 거리
 
   useFrame((state) => {
     const g = group.current
@@ -122,18 +143,38 @@ export default function PointCloudHead({ playing, tune }) {
     const el = state.clock.elapsedTime
 
     if (!playing) {
+      t0.current = null
       g.rotation.y = START_ROT + Math.sin(el * 0.4) * 0.09
       g.rotation.x = Math.sin(el * 0.3) * 0.025
       return
     }
 
-    if (t0.current === null) t0.current = el
-    const p = easeInOut(Math.min(1, (el - t0.current) / 1.9))
-    g.rotation.y = START_ROT * (1 - p)
-    g.rotation.x = 0
-    camera.position.z = 5 - p * 4.05 // 5 → 0.95
-    camera.position.y = p * 0.18
-    camera.lookAt(0, 0.18, 0)
+    // 재생 시작 시점의 회전·카메라 상태를 캡처해 그 지점에서 부드럽게 이어감
+    if (t0.current === null) {
+      t0.current = {
+        t: el,
+        ry: g.rotation.y,
+        rx: g.rotation.x,
+        cx: camera.position.x,
+        cy: camera.position.y,
+        cz: camera.position.z,
+      }
+    }
+    const s = t0.current
+    const p = easeInOut(Math.min(1, (el - s.t) / 1.9))
+    // 옆모습 → 정면
+    g.rotation.y = s.ry * (1 - p)
+    g.rotation.x = s.rx * (1 - p)
+    // 오른쪽 치우침 → 중앙, 그리고 안경 클로즈업으로 줌인
+    camera.position.x = s.cx * (1 - p)
+    camera.position.y = s.cy + (GLASSES_Y - s.cy) * p
+    camera.position.z = s.cz + (endCamZ - s.cz) * p
+    // 시선도 시작 오프셋 → 안경 중심으로 함께 이동(스냅 방지)
+    camera.lookAt(
+      startLookX * (1 - p),
+      startLookY * (1 - p) + GLASSES_Y * p,
+      0,
+    )
   })
 
   return (
