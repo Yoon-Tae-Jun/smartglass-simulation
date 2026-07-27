@@ -7,14 +7,16 @@ UI 상태를 관리합니다.
 - **담당:** 최현우 (프론트엔드 / UI)
 - **작업 브랜치:** `hw/ui`
 
-## 기술 스택
+## 목차
 
-| 구분 | 사용 기술 |
-| --- | --- |
-| 프레임워크 | React 19 |
-| 빌드 도구 | Vite 8 |
-| 언어 | JavaScript (JSX) |
-| 린터 | oxlint |
+- [실행 방법](#실행-방법)
+- [필요 라이브러리](#필요-라이브러리)
+- [담당 기능](#담당-기능)
+- [모듈 구조](#모듈-구조)
+- [다른 모듈과의 연동](#다른-모듈과의-연동)
+- [에셋 출처 (크레딧)](#에셋-출처-크레딧)
+- [협업 규칙](#협업-규칙)
+- [작성자](#작성자)
 
 ## 실행 방법
 
@@ -34,56 +36,94 @@ npm run dev      # 개발 서버 실행 → http://localhost:5173
 > 웹캠을 쓰기 때문에 브라우저가 카메라 권한을 요청합니다. `localhost`는 보안
 > 컨텍스트로 취급되어 개발 중에도 `getUserMedia`가 정상 동작합니다.
 
+## 필요 라이브러리
+
+```
+# 런타임
+react                 # UI 프레임워크 (v19)
+react-dom
+react-router-dom      # 라우팅 (v7)
+three                 # 3D 렌더링 (히어로 포인트 클라우드)
+@react-three/fiber    # three.js React 바인딩
+@react-three/drei     # three.js 헬퍼 (OrbitControls 등)
+tailwindcss           # 스타일 (v4)
+@tailwindcss/vite
+
+# 개발
+vite                  # 빌드 도구 (v8)
+@vitejs/plugin-react
+oxlint                # 린터
+```
+
 ## 담당 기능
 
 - **웹캠 화면 표시 / 교체** — `getUserMedia`로 카메라 스트림을 받아 화면에 표시
+  (이미지 번역 시 캡처 프레임으로 화면 대체)
 - **오버레이 렌더링** — 웹캠 위에 정보 레이어를 얹음
   - 실시간 번역 자막
-  - 길찾기 경로 안내
-  - 환율 변환 결과
-  - 핸드폰 알림
-- **UI 상태 관리** — 지금 어떤 기능(번역/길찾기/환율/질문응답)이 실행 중인지 관리
-- **버튼 트리거** — 웹페이지 버튼으로 각 기능 on/off
+  - 길찾기 경로 안내 (거리·시간·경유 안내)
+  - 이미지 번역 결과
+  - 질문 응답 (+ TTS 음성)
+- **UI 상태 관리** — 지금 어떤 기능(번역/이미지/길찾기/질문응답)이 실행 중인지
+  관리하며, **한 번에 하나의 주 기능만** 활성화
+- **버튼 트리거** — 하단 기능 바 버튼으로 각 기능 on/off
 
-## 폴더 구조
+## 모듈 구조
 
 ```
 web/
-├── index.html          # 진입 HTML
+├── index.html              # 진입 HTML
 ├── package.json
 ├── vite.config.js
-├── public/             # 정적 파일 (빌드 시 그대로 복사)
+├── public/                 # 정적 파일 (빌드 시 그대로 복사: 3D 모델·아이콘 등)
 └── src/
-    ├── main.jsx        # React 앱 진입점
-    ├── App.jsx         # 최상위 컴포넌트
-    ├── App.css
-    ├── index.css
-    └── assets/
+    ├── main.jsx            # React 앱 진입점 + 라우팅 (/ , /simulation)
+    ├── index.css           # 전역 스타일 · 디자인 토큰 (Tailwind v4 @theme)
+    ├── assets/             # 이미지 등 번들 에셋
+    ├── pages/
+    │   ├── Home.jsx        # 인트로 히어로 (3D 포인트 클라우드 → 시뮬레이션 진입)
+    │   └── Simulation.jsx  # 시뮬레이션 화면 (웹캠 + 오버레이 오케스트레이터)
+    ├── components/
+    │   ├── Glasses.jsx         # 히어로용 3D 컴포넌트
+    │   ├── GlassesTuner.jsx
+    │   ├── PointCloudHead.jsx
+    │   ├── Starfield.jsx
+    │   └── sim/                # 시뮬레이션 화면 컴포넌트
+    │       ├── WebcamView.jsx  # getUserMedia 웹캠 표시 + 프레임 캡처
+    │       ├── FeatureBar.jsx  # 하단 기능 토글 바
+    │       └── overlays/       # 기능별 정보 오버레이
+    │           ├── TranslateOverlay.jsx
+    │           ├── ImageTranslateOverlay.jsx
+    │           ├── MapOverlay.jsx
+    │           └── QaOverlay.jsx
+    └── lib/
+        └── simApi.js       # 서버 연동 경계 (현재 mock, BaseResponse 포맷)
 ```
 
-> 앞으로 기능이 늘어나면 `src/` 아래에 `components/`(오버레이 컴포넌트),
-> `hooks/`(웹캠·WebSocket 등), `state/`(UI 상태) 같은 폴더로 나눠갈 예정입니다.
+## 다른 모듈과의 연동
+
+프론트는 다른 팀원들이 만드는 모듈에서 데이터를 받아 화면에 그립니다. 백엔드가
+아직 초안 단계라, 현재는 `src/lib/simApi.js`에서 **공통 응답 포맷
+`{ status, msg, data }`(BaseResponse)** 를 그대로 반환하는 **mock**으로 대체하고
+있습니다. 백엔드가 준비되면 각 함수 내부만 실제 호출로 교체합니다.
+
+| 받아오는 데이터 | 출처 모듈 | 담당 | 엔드포인트(안) | 연동 방식 |
+| --- | --- | --- | --- | --- |
+| 실시간 STT 자막 | `server` (STT) | 지유찬 | `WS /stt/stream` | WebSocket |
+| 목적지/경로·시간 정보 | `server` (map) | 윤태준 | `POST /map/directions` (+`/search`,`/geocode`) | REST |
+| 목적지 추출 | `server` (llm) | 박찬영 | `POST /llm/extract-destination` | REST |
+| 질문응답 | `server` (llm/rag) | 박찬영 | `POST /llm/ask` | REST |
+| 이미지 번역 | `server` (papago) | 미정 | `POST /papago/image` | REST |
+| 핸드폰 알림 | `server` | 윤태준 | `WS /notification/stream` (조사 중) | 미정 |
+
+> 모든 REST 응답은 공통 포맷 `{ status, msg, data }`를 따릅니다.
+> 길찾기 `data` 스키마는 `server/schemas/map.py`(`DirectionsData`)를 기준으로 합니다.
 
 ## 에셋 출처 (크레딧)
 
 | 에셋 | 위치 | 저작자 | 라이선스 |
 | --- | --- | --- | --- |
 | Glasses (스마트글래스 3D) | `public/glasses/glasses.glb` | jeremy (poly.pizza) | CC-BY 3.0 |
-
-## 다른 모듈과의 연동 (예정)
-
-프론트는 다른 팀원들이 만드는 모듈에서 데이터를 받아 화면에 그립니다. **연동
-방식(WebSocket/REST)과 메시지 포맷은 확정되면 여기에 명시합니다.**
-
-| 받아오는 데이터 | 출처 모듈 | 담당 | 연동 방식 |
-| --- | --- | --- | --- |
-| 실시간 STT 자막 | `server` (STT) | 지유찬 | 미정 (WebSocket 예상) |
-| 목적지/경로·시간 정보 | `server` (네이버 맵) | 윤태준 | 미정 |
-| 질문응답 / 환율 결과 | `llm`, `rag` | 박찬영 | 미정 |
-| 핸드폰 알림 | `server` | 윤태준 | 미정 (연동 방식 조사 중) |
-
-> ⚠️ 위 인터페이스(데이터 형식)는 각 담당자와 **초반에 합의해서 고정**하는 것이
-> 나중 충돌을 크게 줄입니다.
 
 ## 협업 규칙
 
@@ -93,3 +133,7 @@ web/
 - 작업 흐름: `hw/ui`에서 개발 → `push` → GitHub에서 `main`으로 **Pull Request**
   → 팀원 1명 승인 후 병합
 - `main`에는 직접 push 하지 않습니다.
+
+## 작성자
+
+최현우 (프론트엔드 / UI)
