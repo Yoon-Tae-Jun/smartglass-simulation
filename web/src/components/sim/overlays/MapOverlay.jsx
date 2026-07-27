@@ -138,7 +138,7 @@ export default function MapOverlay({
             </div>
 
             <ol className="mt-4 space-y-2 border-t border-white/10 pt-3">
-              {data.guide.map((g, i) => (
+              {data.guide.slice(0, 3).map((g, i) => (
                 <li key={i} className="flex items-start gap-2 text-sm">
                   <span className="mt-0.5 text-sky">•</span>
                   <span className="text-white/80">
