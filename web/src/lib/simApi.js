@@ -73,22 +73,24 @@ export async function translateImage(_dataUrl) {
   })
 }
 
-// ── 실시간 대화 번역 (STT 스트리밍) ───────────────────────────
+// ── 실시간 대화 번역 (STT 스트리밍, 양방향) ───────────────────
 // TODO(지유찬): WS /stt/stream 실제 연결 (CLOVA Speech gRPC)
-// 지금은 N초마다 자막을 갱신하는 mock 스트림을 흉내낸다.
+// 지금은 N초마다 자막을 갱신하는 mock 스트림을 흉내낸다. 상대(그들 언어→내 언어)와
+// 나(내 언어→상대 언어)의 발화가 번갈아 오는 양방향 대화를 모사한다.
+// speaker: 'them'(상대) | 'me'(나), spoken: 발화 원문, translated: 번역문
 // onCaption(caption) 을 주기적으로 호출하고, 정리 함수를 반환한다.
 export function startTranslateStream(onCaption) {
-  const mockCaptions = [
-    { src: 'こんにちは、はじめまして。', dst: '안녕하세요, 처음 뵙겠습니다.' },
-    { src: '駅はどこですか？', dst: '역이 어디에 있나요?' },
-    { src: 'まっすぐ行ってください。', dst: '똑바로 가주세요.' },
-    { src: 'ありがとうございます。', dst: '감사합니다.' },
+  const convo = [
+    { speaker: 'them', spoken: 'すみません、駅はどこですか？', translated: '실례합니다, 역이 어디에 있나요?' },
+    { speaker: 'me', spoken: '이 길로 쭉 가시면 됩니다.', translated: 'この道をまっすぐ行ってください。' },
+    { speaker: 'them', spoken: 'ありがとうございます！', translated: '감사합니다!' },
+    { speaker: 'me', spoken: '즐거운 여행 되세요.', translated: '良い旅を。' },
   ]
   let i = 0
-  onCaption(mockCaptions[0])
+  onCaption(convo[0])
   const id = setInterval(() => {
-    i = (i + 1) % mockCaptions.length
-    onCaption(mockCaptions[i])
+    i = (i + 1) % convo.length
+    onCaption(convo[i])
   }, 2600)
   return () => clearInterval(id)
 }

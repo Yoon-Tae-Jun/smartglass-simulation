@@ -82,13 +82,12 @@ export default function Home() {
       )}
 
       {/* 상단 브랜드 */}
-      <span className="hero-ui absolute left-6 top-6 z-10 font-display text-lg font-bold tracking-tight sm:left-8 sm:top-7">
+      <span className="hero-ui absolute left-6 top-6 z-10 font-display text-lg font-bold tracking-tight sm:left-8 sm:top-7 sm:text-xl">
         NAY-BEN<span className="text-sky">.</span>
       </span>
 
       {/* 하단: 짧은 문구 + 시작 버튼 */}
       <div className="hero-ui pointer-events-none absolute inset-x-0 bottom-[12vh] z-10 flex flex-col items-center">
-        <p className="eyebrow text-sky/70">여행을 눈앞에서</p>
         <button
           type="button"
           onClick={() => setPlaying(true)}
