@@ -10,23 +10,26 @@ import QaOverlay from '../components/sim/overlays/QaOverlay.jsx'
 import { getCurrentLocation, startVoiceCommand } from '../lib/simApi.js'
 
 const FEATURE_LABEL = {
-  translate: '실시간 대화 번역',
+  translate: '실시간 음성 번역',
   image: '이미지 번역',
   map: '길찾기',
-  qa: '질문 응답',
+  qa: 'AI에게 질문하기',
 }
 
 // 서버가 감지한 기능 이름 → 프론트 오버레이 key
 const FEATURE_KEY = { navigate: 'map', translate: 'translate', qa: 'qa' }
 
+// 버튼을 누르면 음성인식을 자동으로 켜는 기능들 (이미지 번역은 음성 없음)
+const VOICE_FEATURES = new Set(['translate', 'map', 'qa'])
+
 // 안경 다리에 배치할 기능 — 좌: 번역·이미지 / 우: 길찾기·Q&A
 const LEFT_FEATURES = [
-  { key: 'translate', label: '실시간 번역', icon: '💬' },
+  { key: 'translate', label: '실시간 음성 번역', icon: '💬' },
   { key: 'image', label: '이미지 번역', icon: '🖼️' },
 ]
 const RIGHT_FEATURES = [
   { key: 'map', label: '길찾기', icon: '🧭' },
-  { key: 'qa', label: '질문 응답', icon: '🎙️' },
+  { key: 'qa', label: 'AI에게 질문하기', icon: '🎙️' },
 ]
 
 export default function Simulation() {
@@ -50,8 +53,12 @@ export default function Simulation() {
   const [command, setCommand] = useState(null) // 마지막 음성 명령 { text, feature }
   const [commandError, setCommandError] = useState(null) // 기능 실행 실패 msg (501 등)
   const [voiceDirections, setVoiceDirections] = useState(null) // 음성 navigate 결과
+  const [dialogActive, setDialogActive] = useState(false) // dialog(실시간 음성 번역) 모드 여부
+  const [dialogLine, setDialogLine] = useState(null) // { text, translated, final } | null
   const voiceCtrl = useRef(null)
   const commandRef = useRef(null) // 콜백 클로저에서 최신 명령을 참조
+  const dialogRef = useRef(false) // 콜백 클로저에서 최신 dialog 모드 여부를 참조
+  const voiceFeatureRef = useRef(null) // 음성 세션이 묶인 기능(null=헤더 마이크, 서버 자유 라우팅)
   const sessionId = useRef(0) // 위치 조회를 기다리는 사이 취소됐는지 판별
 
   // 설정 팝오버: ESC로 닫기
@@ -73,16 +80,23 @@ export default function Simulation() {
 
   // 버튼 토글 (FR-SYS-4): 같은 기능이면 off, 다르면 교체
   function handleToggle(key) {
-    setActiveFeature((prev) => {
-      const next = prev === key ? null : key
-      // 이미지 번역 진입 시 현재 프레임을 캡처해 고정
-      if (next === 'image') {
-        setFrameDataUrl(webcamRef.current?.capture() ?? null)
-      } else {
-        setFrameDataUrl(null)
-      }
-      return next
-    })
+    const next = activeFeature === key ? null : key
+    setActiveFeature(next)
+
+    // 이미지 번역 진입 시 현재 프레임을 캡처해 고정
+    if (next === 'image') {
+      setFrameDataUrl(webcamRef.current?.capture() ?? null)
+    } else {
+      setFrameDataUrl(null)
+    }
+
+    // 인식 기능이면 그 기능에 고정된 음성 세션 시작, 아니면(이미지/off) 진행 중이던 인식 정지.
+    // startVoice가 기존 세션을 먼저 정리하므로 "다른 인식은 꺼진다".
+    if (next && VOICE_FEATURES.has(next)) {
+      startVoice(next)
+    } else {
+      stopVoice()
+    }
   }
 
   // 마지막 명령을 상태와 ref에 함께 기록 (ref는 error 이벤트 분기용)
@@ -94,9 +108,34 @@ export default function Simulation() {
 
   // 음성 이벤트 처리: 자막 갱신 / wake → 오버레이 활성 / 실행 결과·실패 주입
   function handleVoiceEvent(evt) {
+    // 버튼으로 연 세션이면 그 기능에 고정 — 서버가 다른 기능을 감지해도 오버레이를 바꾸지 않는다.
+    const lock = voiceFeatureRef.current
     if (evt.kind === 'partial' || evt.kind === 'final') {
-      setVoiceCaption({ text: evt.text, final: evt.kind === 'final' })
+      // dialog(실시간 음성 번역) 모드에선 원문+번역을 번역 오버레이로 보낸다
+      if (dialogRef.current) {
+        setDialogLine({ text: evt.text, translated: evt.translated, final: evt.kind === 'final' })
+      } else {
+        setVoiceCaption({ text: evt.text, final: evt.kind === 'final' })
+      }
+    } else if (evt.kind === 'status') {
+      // 고정 세션은 dialog/command 모드를 프론트가 소유하므로 서버 전환은 무시한다
+      if (lock) return
+      // 서버 모드 전환: dialog 진입 → 번역 오버레이, command 복귀 → 초기화
+      if (evt.text === 'dialog') {
+        dialogRef.current = true
+        setDialogActive(true)
+        setDialogLine(null)
+        setVoiceCaption(null)
+        setCommandError(null)
+        setActiveFeature('translate')
+      } else if (evt.text === 'command') {
+        dialogRef.current = false
+        setDialogActive(false)
+        setDialogLine(null)
+      }
     } else if (evt.kind === 'wake') {
+      // 고정 세션에서 다른 기능이 감지되면 무시한다
+      if (lock && FEATURE_KEY[evt.feature] !== lock) return
       // 새 명령이 시작됐으니 이전 결과는 비운다
       rememberCommand(evt)
       setCommandError(null)
@@ -104,6 +143,8 @@ export default function Simulation() {
       const key = FEATURE_KEY[evt.feature]
       if (key) setActiveFeature(key) // 음성으로 기능 호출
     } else if (evt.kind === 'result') {
+      // 고정 세션에서 다른 기능의 결과는 무시한다
+      if (lock && evt.feature && FEATURE_KEY[evt.feature] !== lock) return
       rememberCommand(evt)
       setCommandError(null)
       if (evt.feature === 'navigate' && evt.data) {
@@ -118,37 +159,66 @@ export default function Simulation() {
     }
   }
 
-  // 마이크 토글: 시작/정지
-  // 시작 전에 GPS 좌표를 받아 WS에 넘긴다 — 목적지만 말했을 때 서버가 출발지로 쓴다.
-  async function toggleVoice() {
-    if (listening) {
-      sessionId.current += 1 // 위치 대기 중인 시작 요청 무효화
-      voiceCtrl.current?.stop()
-      voiceCtrl.current = null
-      setListening(false)
-      return
-    }
+  // 진행 중인 음성 세션 정지 + 관련 상태 초기화
+  function stopVoice() {
+    sessionId.current += 1 // 위치 대기 중인 시작 요청 무효화
+    voiceCtrl.current?.stop()
+    voiceCtrl.current = null
+    voiceFeatureRef.current = null
+    dialogRef.current = false
+    setDialogActive(false)
+    setDialogLine(null)
+    setListening(false)
+  }
+
+  // 음성 세션 시작. feature=null이면 헤더 마이크(서버 자유 라우팅),
+  // 아니면 그 기능에 고정된 세션. 기존 세션은 먼저 정리해 "다른 인식"을 끈다.
+  // 길찾기는 시작 전 GPS 좌표를 받아 넘긴다 — 목적지만 말했을 때 서버가 출발지로 쓴다.
+  async function startVoice(feature) {
+    voiceCtrl.current?.stop() // 실행 중이던 다른 세션 정리
+    voiceCtrl.current = null
 
     const session = (sessionId.current += 1)
-    setVoiceCaption({ text: '현재 위치 확인 중…' })
+    voiceFeatureRef.current = feature
     setVoiceDirections(null)
     setCommandError(null)
     setCommand(null)
     commandRef.current = null
+
+    // 번역은 처음부터 dialog 레이아웃으로, 그 외는 command 모드
+    const isDialog = feature === 'translate'
+    dialogRef.current = isDialog
+    setDialogActive(isDialog)
+    setDialogLine(null)
     setListening(true)
 
-    const location = await getCurrentLocation()
-    if (session !== sessionId.current) return // 대기 중 사용자가 껐거나 화면을 떠남
+    // GPS는 길찾기와 헤더 마이크(어떤 기능이 올지 모름)에만 필요
+    let location = null
+    if (feature === 'map' || feature === null) {
+      setVoiceCaption({ text: '현재 위치 확인 중…' })
+      location = await getCurrentLocation()
+      if (session !== sessionId.current) return // 대기 중 껐거나 다른 기능으로 전환됨
+      // 좌표를 못 받아도 인식은 진행한다 ("○○에서 △△까지" 처럼 출발지를 말하면 됨)
+      setVoiceCaption(
+        location ? null : { error: '위치 권한이 없어 출발지를 함께 말해야 길찾기가 됩니다' },
+      )
+    } else {
+      setVoiceCaption(null)
+    }
 
-    // 좌표를 못 받아도 인식은 진행한다 ("○○에서 △△까지" 처럼 출발지를 말하면 됨)
-    setVoiceCaption(
-      location ? null : { error: '위치 권한이 없어 출발지를 함께 말해야 길찾기가 됩니다' },
-    )
     voiceCtrl.current = startVoiceCommand({
       location,
       language: 'ko',
+      // 번역 버튼은 서버를 곧장 대화 번역(영어→한국어) 모드로 연다 (백엔드 mode 지원 필요)
+      mode: feature === 'translate' ? 'dialog' : undefined,
       onEvent: handleVoiceEvent,
     })
+  }
+
+  // 헤더 마이크 토글: 서버 자유 라우팅 세션 시작/정지
+  function toggleVoice() {
+    if (listening) stopVoice()
+    else startVoice(null)
   }
 
   // 마지막 음성 명령이 지금 열려 있는 오버레이의 것일 때만 그 값을 넘긴다.
@@ -249,7 +319,7 @@ export default function Simulation() {
 
       {/* 본문: 안경 다리(좌) · 캠 뷰포트(중앙) · 안경 다리(우) 1인칭 시점 */}
       <main className="relative z-10 flex flex-1 items-center justify-center gap-3 px-3 py-3 sm:gap-5">
-        <TempleRail side="left" features={LEFT_FEATURES} active={activeFeature} onToggle={handleToggle} />
+        <TempleRail side="left" features={LEFT_FEATURES} active={activeFeature} listening={listening} onToggle={handleToggle} />
 
         {/* 중앙 스마트글래스 뷰포트 */}
         <section className="flex h-full flex-1 items-center justify-center">
@@ -267,6 +337,8 @@ export default function Simulation() {
               <TranslateOverlay
                 langs={{ source: settings.sourceLang, target: settings.targetLang }}
                 error={activeError}
+                dialog={dialogActive}
+                line={dialogLine}
               />
             )}
             {activeFeature === 'image' && <ImageTranslateOverlay frameDataUrl={frameDataUrl} />}
@@ -275,8 +347,8 @@ export default function Simulation() {
             )}
             {activeFeature === 'qa' && <QaOverlay question={commandText} error={activeError} />}
 
-            {/* 음성 인식 라이브 자막 */}
-            {listening && (
+            {/* 음성 인식 라이브 자막 (dialog 모드는 번역 오버레이가 대신 표시) */}
+            {listening && !dialogActive && (
               <div className="pointer-events-none absolute inset-x-0 top-14 z-30 flex justify-center px-6">
                 <div className="hud-chip max-w-lg text-center">
                   <span className="eyebrow text-sky/70">음성 인식 중…</span>
@@ -293,7 +365,7 @@ export default function Simulation() {
           </div>
         </section>
 
-        <TempleRail side="right" features={RIGHT_FEATURES} active={activeFeature} onToggle={handleToggle} />
+        <TempleRail side="right" features={RIGHT_FEATURES} active={activeFeature} listening={listening} onToggle={handleToggle} />
       </main>
     </div>
   )

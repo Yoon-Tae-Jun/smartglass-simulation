@@ -48,16 +48,24 @@ function normalizeStt(res) {
     return { kind: 'error', status: res?.status ?? 0, msg: res?.msg ?? '알 수 없는 오류' }
   }
   const d = res.data ?? {}
-  if (d.type) return { kind: d.type, feature: d.feature ?? null, text: d.text }
+  // type 있으면 인식 이벤트(partial|final|wake|status). status는 command↔dialog 모드 전환,
+  // dialog 모드의 partial|final은 translated(번역문)를 함께 싣는다.
+  if (d.type) {
+    return { kind: d.type, feature: d.feature ?? null, text: d.text, translated: d.translated ?? null }
+  }
   return { kind: 'result', feature: d.feature, text: d.text, data: d.data }
 }
 
 // 마이크 오디오를 16kHz PCM으로 서버에 스트리밍하고, 서버가 보내는
 // 인식 자막 / 명령어 감지(wake) / 기능 실행 결과를 onEvent로 흘려보낸다.
 // location: 현재 위치 좌표 { lat, lng } — 목적지만 말했을 때 navigate 출발지로
-// 쓰인다(서버가 도로명 주소로 역변환). 반환값 .stop() 으로 종료.
-export function startVoiceCommand({ location, language = 'ko', execute = true, onEvent }) {
+//   쓰인다(서버가 도로명 주소로 역변환).
+// mode: 'dialog'면 서버가 처음부터 대화 번역 모드(영어→한국어)로 시작한다.
+//   (미지정=command 모드, 서버가 말로 트리거될 때까지 한국어 명령 인식)
+// 반환값 .stop() 으로 종료.
+export function startVoiceCommand({ location, language = 'ko', mode, execute = true, onEvent }) {
   const params = new URLSearchParams({ language, execute: String(execute) })
+  if (mode) params.set('mode', mode)
   // 서버는 lat/lng가 둘 다 있어야 현재 위치로 인정한다
   if (location?.lat != null && location?.lng != null) {
     params.set('lat', String(location.lat))
@@ -70,10 +78,12 @@ export function startVoiceCommand({ location, language = 'ko', execute = true, o
   let ctx = null, stream = null, proc = null, mute = null, closed = false
 
   function cleanup() {
+    if (closed) return // stop()과 ws.onclose가 둘 다 부를 수 있어 한 번만 실행
     closed = true
     try { if (proc) { proc.onaudioprocess = null; proc.disconnect() } } catch { /* noop */ }
     try { if (mute) mute.disconnect() } catch { /* noop */ }
-    try { if (ctx) ctx.close() } catch { /* noop */ }
+    // close()는 Promise라 이미 닫힌 컨텍스트면 reject → 상태 확인 + catch로 삼킨다
+    try { if (ctx && ctx.state !== 'closed') ctx.close().catch(() => {}) } catch { /* noop */ }
     try { if (stream) stream.getTracks().forEach((t) => t.stop()) } catch { /* noop */ }
   }
 
