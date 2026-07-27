@@ -14,12 +14,7 @@ handle_command()가 등록된 핸들러를 자동으로 찾아 실행하므로 �
 import re
 from typing import Callable, Dict, Optional, Union
 
-from modules.map.service import (
-    geocode,
-    get_directions,
-    reverse_geocode,
-    search_place,
-)
+from modules.map.service import get_directions, reverse_geocode
 from modules.stt.service import detect_command
 from schemas.base import BaseResponse
 from schemas.command import CommandContext, CommandResult
@@ -132,25 +127,21 @@ def navigate(context: CommandContext) -> BaseResponse:
 
 
 """
-길찾기 출발지를 도로명 주소로 확정하는 함수
+길찾기 출발지를 get_directions에 넘길 문자열로 확정하는 함수
 PARAMS:
 - spoken_origin: 문장에서 뽑은 출발지 지명, 없으면 None
 - location: 클라이언트가 보낸 현재 위치 좌표, 없으면 None
 
 RETURN:
-- BaseResponse[str]: status=200이면 data에 도로명 주소, 실패하면 status/msg에 원인
+- BaseResponse[str]: status=200이면 data에 상호명 또는 도로명 주소, 실패하면 status/msg에 원인
 """
 def resolve_origin(
     spoken_origin: Optional[str], location: Optional[Coordinate]
 ) -> BaseResponse[str]:
-    # 시나리오 1: 문장에 출발지가 있으면 그 지명을 쓴다
+    # 시나리오 1: 문장에 출발지가 있으면 말한 지명을 그대로 넘긴다
+    # (상호명/도로명 주소 판별은 get_directions 안의 resolve_place가 처리한다.
+    #  여기서 미리 주소로 바꾸면 그 주소로 상호명이 재검색되어 엉뚱한 이름이 붙는다)
     if spoken_origin:
-        # get_directions의 출발지는 도로명 주소 기준이므로, 좌표 변환이 안 되면 상호명으로 보고 주소를 찾는다
-        if geocode(spoken_origin).status != 200:
-            place_result = search_place(spoken_origin)
-            # 상호명으로도 못 찾으면 말한 그대로 넘겨 get_directions가 404를 내도록 둔다
-            if place_result.status == 200:
-                return success_response(place_result.data.road_address)
         return success_response(spoken_origin)
 
     # 시나리오 2: 목적지만 말했으면 현재 위치 좌표를 도로명 주소로 변환해서 쓴다

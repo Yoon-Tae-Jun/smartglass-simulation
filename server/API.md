@@ -247,7 +247,7 @@ function floatTo16BitPCM(input) {
 
 ### POST `/map/directions`
 
-출발지 → 목적지 경로를 계산한다. 출발지는 **도로명 주소**, 목적지는 상호명도 된다.
+출발지 → 목적지 경로를 계산한다. 출발지/목적지 모두 **상호명 또는 도로명 주소**를 쓸 수 있다.
 
 ```jsonc
 // 요청
@@ -260,6 +260,9 @@ function floatTo16BitPCM(input) {
   "status": 200,
   "msg": "success",
   "data": {
+    // 서버가 확정한 출발지/목적지 도로명 주소
+    "origin": "서울특별시 중구 세종대로 110",
+    "destination": "서울특별시 종로구 사직로 161 경복궁",
     "summary": {
       "distance": 2244,      // m
       "duration": 872633,    // ms
@@ -280,6 +283,7 @@ function floatTo16BitPCM(input) {
 }
 ```
 
+- `origin` / `destination`: 서버가 확정한 도로명 주소. 상호명("경복궁")으로 요청해도 주소로 변환되어 나간다
 - `congestion`: 0=없음, 1=원활, 2=서행, 3=혼잡
 - `type`: 분기점 코드 (1=직진, 2=좌회전, 3=우회전, 6=유턴 등)
 - `point_index`: `path` 배열에서의 위치 → 지도에 안내 지점을 찍을 때 사용
