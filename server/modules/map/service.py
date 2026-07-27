@@ -1,9 +1,7 @@
 import os
 import re
-from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
 
 from schemas.base import BaseResponse
 from schemas.map import (
@@ -15,10 +13,11 @@ from schemas.map import (
     RouteSection,
     RouteSummary,
 )
+from utils.env import load_env
 from utils.errors import catch_request_errors, error_response, success_response
 
-# 환경변수 로드(API URL)
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+# 환경변수 로드(server/.env)
+load_env()
 GEOCODE_URL = os.environ["GEOCODE_URL"]
 LOCAL_SEARCH_URL = os.environ["LOCAL_SEARCH_URL"]
 DIRECTIONS_URL = os.environ["DIRECTIONS_URL"]
@@ -121,7 +120,7 @@ RETURN:
 """
 @catch_request_errors
 def get_directions(request: DirectionsRequest) -> BaseResponse[DirectionsData]:
-    origin_result = geocode(request.origin)
+    origin_result = resolve_destination(request.origin)
     if origin_result.status != 200:
         return origin_result
 

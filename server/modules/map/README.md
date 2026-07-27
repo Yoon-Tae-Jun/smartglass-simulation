@@ -33,12 +33,13 @@ python-dotenv
 ## 모듈 구조
 ```
 map/
-├── .env
 ├── README.md
 ├── router.py
 ├── service.py
 └── test.py
 ```
+
+환경변수(API 키/URL)는 [`server/.env`](../../.env.example)에서 공통으로 관리한다.
 
 ## 출력 예시
 

@@ -12,11 +12,9 @@ server/modules/
   map/
     __init__.py
     service.py   # 팀원이 작성 (기능 로직)
-    router.py    # 통합 담당(윤태준)이 작성 (엔드포인트 연결)
   papago/
     __init__.py
     service.py
-    router.py
 ```
 
 스키마를 모듈 폴더가 아닌 `server/schemas`에 따로 모아두는 이유는, map 모듈의 출력을 papago 모듈이 입력으로 받는 것처럼 모듈 간에 데이터를 주고받는 경우가 있기 때문이다. 스키마가 각자 모듈 안에 있으면 서로 import하다가 꼬이기 쉬운데, 한 곳에 모아두면 어느 모듈에서든 자유롭게 참조할 수 있다.
