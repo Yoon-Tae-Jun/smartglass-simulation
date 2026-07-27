@@ -29,9 +29,9 @@ python -m grpc_tools.protoc --proto_path=. --python_out=. --grpc_python_out=. ne
 
 ## 1. 내 명령 인식 — 실시간 스트리밍 (gRPC)
 
-- WebSocket: `ws://<서버>:8000/stt/ws?language=ko`
+- WebSocket: `ws://<서버>:8000/stt/ws?language=ko&lat=37.56&lng=126.97`
   - `language`: `ko`(기본) / `en` / `ja`
-  - `origin`: 현재 위치(도로명 주소 또는 상호명) — 길찾기 출발지로 사용
+  - `lat`, `lng`: 현재 위치 좌표 — 목적지만 말했을 때 길찾기 출발지로 사용
   - `execute`: `true`(기본)면 명령어 감지 시 기능(map 등)까지 실행해서 결과도 보냄
 - 입력: 바이너리 프레임 = 16kHz·모노·16bit PCM 오디오 청크, 종료는 `{"action":"stop"}`
 - 출력: 모두 공통 포맷 [`BaseResponse`](../../schemas/base.py)로 감싼 JSON

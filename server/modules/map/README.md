@@ -16,11 +16,12 @@ python3 -m modules.map.test
 ```
 
 ```python
-from modules.map.service import geocode, search_place, get_directions
-from schemas.map import DirectionsRequest
+from modules.map.service import geocode, reverse_geocode, search_place, get_directions
+from schemas.map import Coordinate, DirectionsRequest
 
 search_place("순천향대 고기집")
 geocode("충청남도 아산시 순천향로 22")
+reverse_geocode(Coordinate(lat=37.5666103, lng=126.9783882))  # 좌표 -> 도로명 주소
 get_directions(DirectionsRequest(origin="충청남도 아산시 순천향로 22", destination="순천향대 고기집"))
 ```
 

@@ -14,11 +14,16 @@ handle_command()가 등록된 핸들러를 자동으로 찾아 실행하므로 �
 import re
 from typing import Callable, Dict, Optional, Union
 
-from modules.map.service import geocode, get_directions, search_place
+from modules.map.service import (
+    geocode,
+    get_directions,
+    reverse_geocode,
+    search_place,
+)
 from modules.stt.service import detect_command
 from schemas.base import BaseResponse
 from schemas.command import CommandContext, CommandResult
-from schemas.map import DirectionsRequest
+from schemas.map import Coordinate, DirectionsRequest
 from schemas.stt import CommandData
 from utils.errors import error_response, success_response
 
@@ -99,8 +104,13 @@ def clean_place(place: Optional[str]) -> Optional[str]:
 
 """
 길찾기 기능: 문장에서 출발지/목적지를 뽑아 네이버 지도 경로를 조회하는 함수
+
+출발지는 두 가지 시나리오로 나뉜다.
+1. 문장에 출발지가 있는 경우 ("강남역에서 경복궁까지") -> 말한 지명을 도로명 주소로 변환해서 사용
+2. 목적지만 말한 경우 ("경복궁까지 안내해줘") -> 클라이언트가 보낸 현재 위치 좌표를 도로명 주소로 변환해서 사용
+
 PARAMS:
-- context: 인식 문장 + 현재 위치
+- context: 인식 문장 + 현재 위치 좌표
 
 RETURN:
 - BaseResponse[DirectionsData]: status=200이면 data에 경로 정보, 실패하면 status/msg에 원인
@@ -112,19 +122,45 @@ def navigate(context: CommandContext) -> BaseResponse:
     if not destination:
         return error_response(400, f"목적지를 알아듣지 못했습니다: {context.text}")
 
-    # 문장에 출발지가 없으면 현재 위치를 사용
-    origin = spoken_origin or context.origin
-    if not origin:
-        return error_response(400, "출발지를 알 수 없습니다. 현재 위치를 함께 전달해주세요")
+    origin_result = resolve_origin(spoken_origin, context.location)
+    if origin_result.status != 200:
+        return origin_result
 
-    # get_directions의 출발지는 도로명 주소 기준이므로, 좌표 변환이 안 되면 상호명으로 보고 주소를 찾는다
-    if geocode(origin).status != 200:
-        place_result = search_place(origin)
-        # 상호명으로도 못 찾으면 입력값 그대로 넘겨 get_directions가 404를 내도록 둔다
-        if place_result.status == 200:
-            origin = place_result.data.road_address
+    return get_directions(
+        DirectionsRequest(origin=origin_result.data, destination=destination)
+    )
 
-    return get_directions(DirectionsRequest(origin=origin, destination=destination))
+
+"""
+길찾기 출발지를 도로명 주소로 확정하는 함수
+PARAMS:
+- spoken_origin: 문장에서 뽑은 출발지 지명, 없으면 None
+- location: 클라이언트가 보낸 현재 위치 좌표, 없으면 None
+
+RETURN:
+- BaseResponse[str]: status=200이면 data에 도로명 주소, 실패하면 status/msg에 원인
+"""
+def resolve_origin(
+    spoken_origin: Optional[str], location: Optional[Coordinate]
+) -> BaseResponse[str]:
+    # 시나리오 1: 문장에 출발지가 있으면 그 지명을 쓴다
+    if spoken_origin:
+        # get_directions의 출발지는 도로명 주소 기준이므로, 좌표 변환이 안 되면 상호명으로 보고 주소를 찾는다
+        if geocode(spoken_origin).status != 200:
+            place_result = search_place(spoken_origin)
+            # 상호명으로도 못 찾으면 말한 그대로 넘겨 get_directions가 404를 내도록 둔다
+            if place_result.status == 200:
+                return success_response(place_result.data.road_address)
+        return success_response(spoken_origin)
+
+    # 시나리오 2: 목적지만 말했으면 현재 위치 좌표를 도로명 주소로 변환해서 쓴다
+    if location:
+        address_result = reverse_geocode(location)
+        if address_result.status != 200:
+            return address_result
+        return success_response(address_result.data.road_address)
+
+    return error_response(400, "출발지를 알 수 없습니다. 현재 위치 좌표를 함께 전달해주세요")
 
 
 # ---------------------------------------------------------------- dispatch --
@@ -135,13 +171,13 @@ PARAMS:
 - command: stt의 인식 결과(CommandData), 또는 인식된 문장(str)
   - CommandData: WebSocket wake 이벤트처럼 기능까지 판별된 경우 그대로 전달
   - str: 문장만 있는 경우, stt의 detect_command로 기능을 판별한 뒤 실행
-- origin: 현재 위치 (도로명 주소 또는 상호명), 길찾기에서 출발지로 사용
+- location: 클라이언트가 보낸 현재 위치 좌표, 길찾기에서 출발지로 사용
 
 RETURN:
 - BaseResponse[CommandResult]: status=200이면 data에 실행한 기능/결과, 실패하면 status/msg에 원인
 """
 def handle_command(
-    command: Union[CommandData, str], origin: Optional[str] = None
+    command: Union[CommandData, str], location: Optional[Coordinate] = None
 ) -> BaseResponse[CommandResult]:
     # 문장만 넘어온 경우 기능 판별은 stt 모듈에 맡긴다
     if isinstance(command, str):
@@ -159,7 +195,7 @@ def handle_command(
     if handler is None:
         return error_response(501, f"아직 지원하지 않는 기능입니다: {command.feature}")
 
-    handler_result = handler(CommandContext(text=command.text, origin=origin))
+    handler_result = handler(CommandContext(text=command.text, location=location))
     if handler_result.status != 200:
         return handler_result
 

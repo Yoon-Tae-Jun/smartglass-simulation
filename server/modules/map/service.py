@@ -5,6 +5,7 @@ import requests
 
 from schemas.base import BaseResponse
 from schemas.map import (
+    AddressInfo,
     Coordinate,
     DirectionsData,
     DirectionsRequest,
@@ -19,6 +20,7 @@ from utils.errors import catch_request_errors, error_response, success_response
 # 환경변수 로드(server/.env)
 load_env()
 GEOCODE_URL = os.environ["GEOCODE_URL"]
+REVERSE_GEOCODE_URL = os.environ["REVERSE_GEOCODE_URL"]
 LOCAL_SEARCH_URL = os.environ["LOCAL_SEARCH_URL"]
 DIRECTIONS_URL = os.environ["DIRECTIONS_URL"]
 
@@ -53,6 +55,66 @@ def geocode(address: str) -> BaseResponse[Coordinate]:
     first = addresses[0]
     coordinate = Coordinate(lat=float(first["y"]), lng=float(first["x"]))
     return success_response(coordinate)
+
+
+"""
+좌표(위도/경도)를 도로명 주소로 변환하는 함수
+PARAMS:
+- coordinate: 변환할 좌표 (현재 위치 등)
+
+RETURN:
+- BaseResponse[AddressInfo]: status=200이면 data에 도로명 주소, 실패하면 status/msg에 원인
+"""
+@catch_request_errors
+def reverse_geocode(coordinate: Coordinate) -> BaseResponse[AddressInfo]:
+    response = requests.get(
+        REVERSE_GEOCODE_URL,
+        # coords는 "경도,위도" 순서, orders에 addr을 함께 넣으면 403이 나므로 roadaddr만 요청한다
+        params={
+            "coords": f"{coordinate.lng},{coordinate.lat}",
+            "output": "json",
+            "orders": "roadaddr",
+        },
+        headers={
+            "x-ncp-apigw-api-key-id": os.environ["MAP_CLIENT_ID"],
+            "x-ncp-apigw-api-key": os.environ["MAP_SECRET_KEY"],
+            "Accept": "application/json",
+        },
+    )
+    response.raise_for_status()
+
+    body = response.json()
+    results = body.get("results") or []
+    # 바다 위 좌표처럼 주소가 없는 경우
+    if not results:
+        return error_response(
+            404, f"좌표에 해당하는 주소가 없습니다: {coordinate.lat},{coordinate.lng}"
+        )
+
+    region = results[0]["region"]
+    land = results[0]["land"]
+    # 도로명 주소 조합: 시/도 + 시/군/구 + 도로명 + 건물번호(본번-부번)
+    building_number = land["number1"]
+    if land.get("number2"):
+        building_number += f"-{land['number2']}"
+
+    road_address = " ".join(
+        part
+        for part in [
+            region["area1"]["name"],
+            region["area2"]["name"],
+            land["name"],
+            building_number,
+        ]
+        if part
+    )
+    # 도로명이 없는 지역(신설 도로 등)인 경우
+    if not land["name"]:
+        return error_response(
+            404, f"좌표에 해당하는 도로명 주소가 없습니다: {coordinate.lat},{coordinate.lng}"
+        )
+
+    return success_response(AddressInfo(road_address=road_address))
 
 
 """

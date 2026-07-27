@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from schemas.base import BaseResponse
+from schemas.map import Coordinate
 from schemas.stt import CommandData
 from service import handle_command
 
@@ -23,7 +24,7 @@ EXECUTE_TIMEOUT = 10.0  # 종료 시 실행 중인 기능이 끝나기를 기다
 입력: 바이너리 프레임 = 16kHz·모노·16bit PCM 청크, 종료는 {"action": "stop"}
 쿼리:
 - language: 인식 언어 (ko | en | ja)
-- origin: 현재 위치 (도로명 주소 또는 상호명), 길찾기 출발지로 사용
+- lat, lng: 현재 위치 좌표. 목적지만 말했을 때 길찾기 출발지로 사용된다
 - execute: true면 명령어 감지 시 기능(map 등)까지 실행해서 결과를 함께 보냄
 
 출력: 모두 BaseResponse JSON
@@ -34,12 +35,15 @@ EXECUTE_TIMEOUT = 10.0  # 종료 시 실행 중인 기능이 끝나기를 기다
 async def stream(
     websocket: WebSocket,
     language: str = "ko",
-    origin: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
     execute: bool = True,
 ):
     await websocket.accept()
     loop = asyncio.get_running_loop()
     running: list[threading.Thread] = []  # 실행 중인 기능 스레드
+    # 둘 다 들어왔을 때만 현재 위치로 인정한다
+    location = Coordinate(lat=lat, lng=lng) if lat is not None and lng is not None else None
 
     # 인식 콜백은 gRPC 스레드에서 오므로 이벤트 루프로 넘겨서 전송한다
     def send(payload: BaseResponse) -> None:
@@ -57,7 +61,7 @@ async def stream(
         # 기능 실행(외부 API 호출)이 인식 스트림을 막지 않도록 별도 스레드에서 처리
         command = CommandData(text=event.text, feature=event.feature)
         thread = threading.Thread(
-            target=lambda: send(handle_command(command, origin=origin)),
+            target=lambda: send(handle_command(command, location=location)),
             daemon=True,
         )
         running.append(thread)
