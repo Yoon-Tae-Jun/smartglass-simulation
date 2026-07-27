@@ -1,96 +1,129 @@
 // ─────────────────────────────────────────────────────────────
-// 시뮬레이션 mock/stub API 경계
-// 백엔드(STT/map/LLM/Papago)는 아직 미완이므로, 여기서는 서버와
-// 동일한 공통 응답 포맷 { status, msg, data }(BaseResponse)를 반환하는
-// mock 함수만 제공한다. 백엔드가 준비되면 각 함수 내부를 실제
-// fetch/WebSocket 호출로 교체하면 된다. (담당자 TODO 참고)
+// 시뮬레이션 API 경계
+// 서버와 동일한 공통 응답 포맷 { status, msg, data }(BaseResponse)를 다룬다.
+// 실연동: 길찾기(POST /map/directions), 음성 명령(WS /stt/ws).
+// 번역·질문응답·이미지 번역은 서버 미구현이라 여기서 제공하지 않는다(오버레이가 '준비 중' 표시).
 // ─────────────────────────────────────────────────────────────
 
-// 서버 BaseResponse[T] 와 동일 형태
-const ok = (data, msg = 'success') => ({ status: 200, msg, data })
-
-const delay = (ms) => new Promise((r) => setTimeout(r, ms))
+// 백엔드 주소 (env 없으면 로컬 기본값). WS는 http→ws 로 파생.
+const HTTP_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
+const WS_BASE = HTTP_BASE.replace(/^http/, 'ws')
 
 // ── 길찾기 (F-MAP) ────────────────────────────────────────────
-// TODO(윤태준): POST /map/directions 실제 연결
-//   req: { origin, destination } → data: DirectionsData (schemas/map.py)
+// POST /map/directions — req: { origin(도로명주소), destination(상호명/주소) }
+// 서버가 BaseResponse를 주므로 그대로 반환한다. (실패도 HTTP 200)
 export async function getDirections({ origin, destination }) {
-  await delay(700)
-  return ok({
-    summary: {
-      distance: 1288, // m
-      duration: 212374, // ms
-      toll_fare: 0,
-      taxi_fare: 4000,
-      fuel_price: 172,
+  try {
+    const res = await fetch(`${HTTP_BASE}/map/directions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origin, destination }),
+    })
+    return await res.json()
+  } catch (e) {
+    // 네트워크/파싱 실패는 공통 포맷으로 감싸 오버레이가 msg를 표시하게 한다
+    return { status: 502, msg: `서버에 연결할 수 없습니다: ${e?.message ?? e}`, data: null }
+  }
+}
+
+// ── 음성 명령 (WS /stt/ws, 실연동) ─────────────────────────────
+// 서버 BaseResponse → 프론트 이벤트로 정규화.
+// data.type 있으면 인식 이벤트(partial|final|wake), 없으면 기능 실행 결과.
+function normalizeStt(res) {
+  if (!res || res.status !== 200) {
+    return { kind: 'error', status: res?.status ?? 0, msg: res?.msg ?? '알 수 없는 오류' }
+  }
+  const d = res.data ?? {}
+  if (d.type) return { kind: d.type, feature: d.feature ?? null, text: d.text }
+  return { kind: 'result', feature: d.feature, text: d.text, data: d.data }
+}
+
+// 마이크 오디오를 16kHz PCM으로 서버에 스트리밍하고, 서버가 보내는
+// 인식 자막 / 명령어 감지(wake) / 기능 실행 결과를 onEvent로 흘려보낸다.
+// origin: 현재 위치(도로명 주소) — navigate 출발지. 반환값 .stop() 으로 종료.
+export function startVoiceCommand({ origin, language = 'ko', execute = true, onEvent }) {
+  const params = new URLSearchParams({ language, execute: String(execute) })
+  if (origin) params.set('origin', origin)
+
+  const ws = new WebSocket(`${WS_BASE}/stt/ws?${params.toString()}`)
+  ws.binaryType = 'arraybuffer'
+
+  let ctx = null, stream = null, proc = null, mute = null, closed = false
+
+  function cleanup() {
+    closed = true
+    try { if (proc) { proc.onaudioprocess = null; proc.disconnect() } } catch { /* noop */ }
+    try { if (mute) mute.disconnect() } catch { /* noop */ }
+    try { if (ctx) ctx.close() } catch { /* noop */ }
+    try { if (stream) stream.getTracks().forEach((t) => t.stop()) } catch { /* noop */ }
+  }
+
+  ws.onmessage = (ev) => {
+    let res
+    try { res = JSON.parse(ev.data) } catch { return }
+    onEvent(normalizeStt(res))
+  }
+  ws.onerror = () => onEvent({ kind: 'error', status: 0, msg: '음성 서버에 연결할 수 없습니다' })
+  ws.onclose = () => cleanup()
+
+  ws.onopen = async () => {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch (e) {
+      onEvent({ kind: 'error', status: 403, msg: `마이크를 사용할 수 없습니다: ${e?.name ?? e}` })
+      try { ws.close() } catch { /* noop */ }
+      return
+    }
+    if (closed) { stream.getTracks().forEach((t) => t.stop()); return }
+
+    ctx = new AudioContext()
+    const src = ctx.createMediaStreamSource(stream)
+    proc = ctx.createScriptProcessor(4096, 1, 1)
+    mute = ctx.createGain()
+    mute.gain.value = 0 // 스피커 피드백 방지
+    src.connect(proc); proc.connect(mute); mute.connect(ctx.destination)
+
+    proc.onaudioprocess = (e) => {
+      if (ws.readyState !== 1) return
+      const pcm = floatTo16BitPCM(downsampleTo16k(e.inputBuffer.getChannelData(0), ctx.sampleRate))
+      ws.send(pcm)
+    }
+  }
+
+  return {
+    stop() {
+      if (ws.readyState === 1) {
+        try { ws.send(JSON.stringify({ action: 'stop' })) } catch { /* noop */ }
+        ws.close()
+      }
+      cleanup()
     },
-    path: [
-      { lat: 36.7683778, lng: 126.9289743 },
-      { lat: 36.7684012, lng: 126.9290011 },
-    ],
-    section: [
-      {
-        point_index: 0,
-        point_count: 48,
-        distance: 1288,
-        name: '순천향로',
-        congestion: 1, // 0:없음 1:원활 2:서행 3:혼잡
-        speed: 32,
-      },
-    ],
-    guide: [
-      { point_index: 0, type: 1, instructions: `${origin}에서 직진`, distance: 320, duration: 45000 },
-      { point_index: 12, type: 3, instructions: '순천향로에서 우회전', distance: 620, duration: 88000 },
-      { point_index: 34, type: 2, instructions: '중앙로에서 좌회전', distance: 348, duration: 52000 },
-      { point_index: 47, type: 1, instructions: `목적지 "${destination}" 도착`, distance: 0, duration: 0 },
-    ],
-  })
+  }
 }
 
-// ── 질문 응답 (F-QA) ──────────────────────────────────────────
-// TODO(박찬영): POST /llm/ask 실제 연결 (LLM + RAG)
-export async function askQuestion(question) {
-  await delay(900)
-  return ok({
-    question,
-    answer:
-      '경복궁은 조선 왕조의 정궁으로, 지하철 3호선 경복궁역 5번 출구에서 도보 5분 거리입니다. 관람 시간은 오전 9시부터이며 화요일은 휴관입니다.',
-  })
+// ── 마이크 오디오 → 16kHz 모노 16bit PCM 변환 헬퍼 ───────────────
+function downsampleTo16k(buffer, inRate) {
+  const outRate = 16000
+  if (inRate === outRate) return buffer
+  const ratio = inRate / outRate
+  const newLen = Math.round(buffer.length / ratio)
+  const result = new Float32Array(newLen)
+  let oR = 0, oB = 0
+  while (oR < newLen) {
+    const next = Math.round((oR + 1) * ratio)
+    let acc = 0, cnt = 0
+    for (let i = oB; i < next && i < buffer.length; i++) { acc += buffer[i]; cnt++ }
+    result[oR++] = acc / (cnt || 1)
+    oB = next
+  }
+  return result
 }
 
-// ── 이미지 번역 ───────────────────────────────────────────────
-// TODO(미정): POST /papago/image 실제 연결 (웹캠 캡처 이미지 → 번역 이미지)
-export async function translateImage(_dataUrl) {
-  await delay(1100)
-  return ok({
-    // 실제로는 번역된 이미지(base64/URL)가 온다. mock은 라벨만.
-    label: '메뉴판 번역 완료 (mock)',
-    lines: [
-      { src: '불고기', dst: 'Bulgogi (Grilled Beef)' },
-      { src: '비빔밥', dst: 'Bibimbap (Mixed Rice)' },
-      { src: '김치찌개', dst: 'Kimchi Stew' },
-    ],
-  })
-}
-
-// ── 실시간 대화 번역 (STT 스트리밍, 양방향) ───────────────────
-// TODO(지유찬): WS /stt/stream 실제 연결 (CLOVA Speech gRPC)
-// 지금은 N초마다 자막을 갱신하는 mock 스트림을 흉내낸다. 상대(그들 언어→내 언어)와
-// 나(내 언어→상대 언어)의 발화가 번갈아 오는 양방향 대화를 모사한다.
-// speaker: 'them'(상대) | 'me'(나), spoken: 발화 원문, translated: 번역문
-// onCaption(caption) 을 주기적으로 호출하고, 정리 함수를 반환한다.
-export function startTranslateStream(onCaption) {
-  const convo = [
-    { speaker: 'them', spoken: 'すみません、駅はどこですか？', translated: '실례합니다, 역이 어디에 있나요?' },
-    { speaker: 'me', spoken: '이 길로 쭉 가시면 됩니다.', translated: 'この道をまっすぐ行ってください。' },
-    { speaker: 'them', spoken: 'ありがとうございます！', translated: '감사합니다!' },
-    { speaker: 'me', spoken: '즐거운 여행 되세요.', translated: '良い旅を。' },
-  ]
-  let i = 0
-  onCaption(convo[0])
-  const id = setInterval(() => {
-    i = (i + 1) % convo.length
-    onCaption(convo[i])
-  }, 2600)
-  return () => clearInterval(id)
+function floatTo16BitPCM(input) {
+  const out = new Int16Array(input.length)
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]))
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff
+  }
+  return out.buffer
 }

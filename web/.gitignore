@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# 실제 키/주소가 담긴 로컬 env (예시는 커밋)
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -14,12 +14,24 @@ const fmtDuration = (ms) => {
   return `${Math.floor(min / 60)}시간 ${min % 60}분`
 }
 
-export default function MapOverlay({ origin = '아산시 순천향로 11', destination = '서울 고기집' }) {
-  const [data, setData] = useState(null)
+export default function MapOverlay({
+  origin = '서울특별시 중구 세종대로 110',
+  destination = '경복궁',
+  directions = null,
+}) {
+  const [data, setData] = useState(directions)
   const [err, setErr] = useState(null)
 
   useEffect(() => {
+    // 음성 명령으로 이미 받은 경로가 있으면 그대로 사용 (재요청 안 함)
+    if (directions) {
+      setData(directions)
+      setErr(null)
+      return
+    }
     let alive = true
+    setData(null)
+    setErr(null)
     getDirections({ origin, destination }).then((res) => {
       if (!alive) return
       if (res.status === 200 && res.data) setData(res.data)
@@ -28,7 +40,7 @@ export default function MapOverlay({ origin = '아산시 순천향로 11', desti
     return () => {
       alive = false
     }
-  }, [origin, destination])
+  }, [origin, destination, directions])
 
   return (
     <div className="pointer-events-none absolute right-4 top-14 z-20 w-[280px]">
