@@ -10,6 +10,7 @@ from schemas.map import (
     DirectionsData,
     DirectionsRequest,
     PlaceInfo,
+    ResolvedPlace,
     RouteGuide,
     RouteSection,
     RouteSummary,
@@ -153,14 +154,14 @@ def search_place(query: str) -> BaseResponse[PlaceInfo]:
 
 
 """
-목적지 문자열(상호명 또는 도로명 주소)을 좌표로 변환하는 함수
+장소 문자열(상호명 또는 도로명 주소)을 도로명 주소와 좌표로 확정하는 함수
 PARAMS:
 - query: 상호명 또는 도로명 주소 문자열
 
 RETURN:
-- BaseResponse[Coordinate]: status=200이면 data에 좌표, 실패하면 status/msg에 원인
+- BaseResponse[ResolvedPlace]: status=200이면 data에 확정된 장소, 실패하면 status/msg에 원인
 """
-def resolve_destination(query: str) -> BaseResponse[Coordinate]:
+def resolve_place(query: str) -> BaseResponse[ResolvedPlace]:
     # 상호명으로 먼저 검색
     place_result = search_place(query)
     if place_result.status == 200:
@@ -169,29 +170,38 @@ def resolve_destination(query: str) -> BaseResponse[Coordinate]:
         # 검색 결과가 없으면 입력값 자체를 도로명 주소로 취급
         road_address = query
 
-    return geocode(road_address)
+    coordinate_result = geocode(road_address)
+    if coordinate_result.status != 200:
+        return coordinate_result
+
+    return success_response(
+        ResolvedPlace(road_address=road_address, coordinate=coordinate_result.data)
+    )
 
 
 """
 출발지, 목적지 사이의 경로를 계산하는 함수
 PARAMS:
-- request: 출발지(도로명 주소), 목적지(상호명 또는 도로명 주소)
+- request: 출발지/목적지 (각각 상호명 또는 도로명 주소)
 
 RETURN:
-- BaseResponse[DirectionsData]: status=200이면 data에 경로 정보, 실패하면 status/msg에 원인
+- BaseResponse[DirectionsData]: status=200이면 data에 확정된 출발지/목적지 + 경로 정보,
+  실패하면 status/msg에 원인
 """
 @catch_request_errors
 def get_directions(request: DirectionsRequest) -> BaseResponse[DirectionsData]:
-    origin_result = resolve_destination(request.origin)
+    origin_result = resolve_place(request.origin)
     if origin_result.status != 200:
         return origin_result
 
-    destination_result = resolve_destination(request.destination)
+    destination_result = resolve_place(request.destination)
     if destination_result.status != 200:
         return destination_result
 
-    origin_coord = origin_result.data
-    destination_coord = destination_result.data
+    origin = origin_result.data
+    destination = destination_result.data
+    origin_coord = origin.coordinate
+    destination_coord = destination.coordinate
 
     response = requests.get(
         DIRECTIONS_URL,
@@ -216,6 +226,8 @@ def get_directions(request: DirectionsRequest) -> BaseResponse[DirectionsData]:
     summary = route["summary"]
 
     directions_data = DirectionsData(
+        origin=origin.road_address,
+        destination=destination.road_address,
         summary=RouteSummary(
             distance=summary["distance"],
             duration=summary["duration"],

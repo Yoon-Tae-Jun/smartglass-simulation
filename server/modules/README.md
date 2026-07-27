@@ -66,7 +66,7 @@ def search_place(query: str) -> BaseResponse[SearchResult]:
 - `success_response(data)`: `status=200, msg="success"`인 `BaseResponse` 생성
 - `error_response(status, msg)`: `data=None`인 실패 `BaseResponse` 생성 (예: 404=찾을 수 없음)
 - `catch_request_errors`: 함수를 감싸서 `requests`의 네트워크/HTTP 예외를 502 `BaseResponse`로 변환하는 데코레이터
-- 다른 모듈 함수를 호출할 때는 `result = other_service_fn(...)` 후 `result.status == 200`인지 확인하고 진행 (`modules/map/service.py`의 `get_directions`, `resolve_destination` 참고)
+- 다른 모듈 함수를 호출할 때는 `result = other_service_fn(...)` 후 `result.status == 200`인지 확인하고 진행 (`modules/map/service.py`의 `get_directions`, `resolve_place` 참고)
 
 ## 작성 예시
 

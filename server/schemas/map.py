@@ -16,7 +16,7 @@ class AddressInfo(BaseModel):
 
 
 class DirectionsRequest(BaseModel):
-    origin: str  # 출발지 도로명 주소
+    origin: str  # 출발지 (상호명 또는 도로명 주소)
     destination: str  # 목적지 (상호명 또는 도로명 주소)
 
 
@@ -45,7 +45,15 @@ class RouteGuide(BaseModel):
     duration: int  # 이전 분기점부터의 소요시간 (ms)
 
 
+# 장소 문자열을 주소/좌표로 확정한 결과 (내부 전달용, 응답에는 road_address만 나간다)
+class ResolvedPlace(BaseModel):
+    road_address: str  # 도로명 주소
+    coordinate: Coordinate  # 변환된 좌표
+
+
 class DirectionsData(BaseModel):
+    origin: str  # 확정된 출발지 도로명 주소
+    destination: str  # 확정된 목적지 도로명 주소
     summary: RouteSummary
     path: list[Coordinate]
     section: list[RouteSection]
