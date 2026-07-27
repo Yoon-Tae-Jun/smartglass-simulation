@@ -11,6 +11,10 @@ class PlaceInfo(BaseModel):
     road_address: str  # 도로명 주소
 
 
+class AddressInfo(BaseModel):
+    road_address: str  # 도로명 주소
+
+
 class DirectionsRequest(BaseModel):
     origin: str  # 출발지 도로명 주소
     destination: str  # 목적지 (상호명 또는 도로명 주소)

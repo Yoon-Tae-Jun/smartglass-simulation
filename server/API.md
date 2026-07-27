@@ -51,7 +51,7 @@ if (body.status !== 200) showError(body.msg);
 명령어 판별과 기능 실행(지도 호출 등)은 서버 내부에서 처리하므로 클라이언트가 따로 호출할 API는 없다.
 
 ```
-ws://localhost:8000/stt/ws?language=ko&origin=서울특별시 중구 세종대로 110
+ws://localhost:8000/stt/ws?language=ko&lat=37.5666103&lng=126.9783882
 ```
 
 ### 쿼리 파라미터
@@ -59,10 +59,18 @@ ws://localhost:8000/stt/ws?language=ko&origin=서울특별시 중구 세종대�
 | 이름 | 기본값 | 설명 |
 |---|---|---|
 | `language` | `ko` | 인식 언어 (`ko` / `en` / `ja`) |
-| `origin` | 없음 | 현재 위치(도로명 주소 또는 상호명). 길찾기 출발지로 쓰인다 |
+| `lat`, `lng` | 없음 | 현재 위치 좌표 (위도, 경도). 둘 다 있어야 인정된다 |
 | `execute` | `true` | `false`면 인식만 하고 기능은 실행하지 않는다 |
 
-> `origin`이 없고 사용자가 출발지를 말하지도 않으면 길찾기는 `400`으로 실패한다.
+### 길찾기 출발지 규칙
+
+| 사용자가 말한 내용 | 출발지 |
+|---|---|
+| "**강남역에서** 경복궁까지 가는 길 알려줘" | 말한 지명(`강남역`)을 서버가 도로명 주소로 변환해 사용. `lat`/`lng`는 무시 |
+| "경복궁까지 안내해줘" (목적지만) | `lat`/`lng`를 서버가 **도로명 주소로 역변환**해서 사용 |
+| 목적지만 말했는데 `lat`/`lng`도 없음 | `400 출발지를 알 수 없습니다. 현재 위치 좌표를 함께 전달해주세요` |
+
+좌표는 브라우저 `navigator.geolocation.getCurrentPosition()`으로 얻어서 연결 시 넘기면 된다.
 
 ### 보내는 것
 
@@ -106,11 +114,19 @@ ws://localhost:8000/stt/ws?language=ko&origin=서울특별시 중구 세종대�
 // 목적지를 알아듣지 못함 (인식 이벤트는 정상적으로 오고, 실행 결과만 실패)
 { "status": 400, "msg": "목적지를 알아듣지 못했습니다: 길 알려줘", "data": null }
 
+// 목적지만 말했는데 현재 위치 좌표가 없음
+{ "status": 400, "msg": "출발지를 알 수 없습니다. 현재 위치 좌표를 함께 전달해주세요", "data": null }
+
+// 좌표에 해당하는 도로명 주소가 없음 (바다 위 등)
+{ "status": 404, "msg": "좌표에 해당하는 주소가 없습니다: 33.0,126.0", "data": null }
+
 // 아직 구현되지 않은 기능
 { "status": 501, "msg": "아직 지원하지 않는 기능입니다: translate", "data": null }
 ```
 
 ### 처리 순서 예시
+
+`lat=37.5666103&lng=126.9783882`(서울시청)로 연결하고 "경복궁까지 가는 길 알려줘"라고 말한 경우:
 
 ```
 (오디오 전송)
@@ -118,6 +134,7 @@ ws://localhost:8000/stt/ws?language=ko&origin=서울특별시 중구 세종대�
   → partial "경복궁까지 가는 길 알려줘"
   → final   "경복궁까지 가는 길 알려줘"
   → wake    feature=navigate
+       (서버 내부: 좌표 → "서울특별시 중구 세종대로 110" 역변환 → 경로 조회)
   → 실행 결과 (거리 2,244m / 예상 택시비 5,900원)
 ```
 
@@ -126,7 +143,11 @@ ws://localhost:8000/stt/ws?language=ko&origin=서울특별시 중구 세종대�
 ### 클라이언트 예제 (브라우저)
 
 ```js
-const ws = new WebSocket(`ws://localhost:8000/stt/ws?language=ko&origin=${encodeURIComponent(myAddress)}`);
+// 현재 위치를 받아 좌표로 연결한다 (목적지만 말했을 때 출발지로 쓰인다)
+const pos = await new Promise((ok, err) => navigator.geolocation.getCurrentPosition(ok, err));
+const { latitude: lat, longitude: lng } = pos.coords;
+
+const ws = new WebSocket(`ws://localhost:8000/stt/ws?language=ko&lat=${lat}&lng=${lng}`);
 ws.binaryType = "arraybuffer";
 
 ws.onmessage = (ev) => {
@@ -262,6 +283,16 @@ function floatTo16BitPCM(input) {
 - `congestion`: 0=없음, 1=원활, 2=서행, 3=혼잡
 - `type`: 분기점 코드 (1=직진, 2=좌회전, 3=우회전, 6=유턴 등)
 - `point_index`: `path` 배열에서의 위치 → 지도에 안내 지점을 찍을 때 사용
+
+### 좌표 → 도로명 주소 (REST 미제공)
+
+역변환은 WebSocket 길찾기 안에서만 쓰이므로 엔드포인트로 열려 있지 않다.
+서버 코드에서는 [`modules/map/service.py`](modules/map/service.py)의 `reverse_geocode(Coordinate)`로 호출한다.
+
+```python
+reverse_geocode(Coordinate(lat=37.5666103, lng=126.9783882))
+# {"status": 200, "msg": "success", "data": {"road_address": "서울특별시 중구 세종대로 110"}}
+```
 
 ---
 

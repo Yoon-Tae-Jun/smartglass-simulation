@@ -2,10 +2,12 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 
+from schemas.map import Coordinate
+
 
 class CommandContext(BaseModel):
     text: str  # 음성에서 인식된 문장
-    origin: Optional[str] = None  # 현재 위치 (도로명 주소 또는 상호명), navigate에서 출발지로 사용
+    location: Optional[Coordinate] = None  # 현재 위치 좌표, navigate에서 출발지로 사용
     # 기능이 추가되면 여기에 필드를 늘린다 (예: image: bytes - 이미지 인식용)
 
 
