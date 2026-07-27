@@ -248,12 +248,12 @@ export default function Simulation() {
       </header>
 
       {/* 본문: 안경 다리(좌) · 캠 뷰포트(중앙) · 안경 다리(우) 1인칭 시점 */}
-      <main className="relative z-10 flex flex-1 items-center justify-center gap-4 px-6 py-6 sm:gap-6">
+      <main className="relative z-10 flex flex-1 items-center justify-center gap-3 px-3 py-3 sm:gap-5">
         <TempleRail side="left" features={LEFT_FEATURES} active={activeFeature} onToggle={handleToggle} />
 
         {/* 중앙 스마트글래스 뷰포트 */}
         <section className="flex h-full flex-1 items-center justify-center">
-          <div className="relative aspect-video max-h-full w-full max-w-4xl overflow-hidden rounded-3xl border border-sky/25 bg-black shadow-[0_0_60px_rgba(45,169,239,0.18)]">
+          <div className="relative aspect-video max-h-full w-full max-w-6xl overflow-hidden rounded-3xl border border-sky/25 bg-black shadow-[0_0_60px_rgba(45,169,239,0.18)]">
             {/* 웹캠 실시간 표시 (FR-SYS-1) */}
             <WebcamView ref={webcamRef} deviceId={selectedCamera} onDevices={setCameras} />
 
