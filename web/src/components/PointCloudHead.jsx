@@ -14,9 +14,9 @@ const ROT_Y = 0.0 // 얼굴 방향이 뒤를 보면 Math.PI 로
 
 // 머리 점 개수(스캔 룩: 조밀하게) — 실제 표시는 HEAD_COUNT 로 drawRange 조절
 const HEAD_POINTS = 90000 // 샘플링(빌드) 최대 개수
-const HEAD_COUNT = 49000 // 표시 개수(강조도) — 튜너로 확정
-const HEAD_SIZE = 0.009 // 점 크기 — 튜너로 확정
-const HEAD_BRIGHT = 0.65 // 밝기 배수(0~1, 낮을수록 덜 강조) — 튜너로 확정
+const HEAD_COUNT = 67000 // 표시 개수(강조도) — 튜너로 확정
+const HEAD_SIZE = 0.007 // 점 크기 — 튜너로 확정
+const HEAD_BRIGHT = 0.60 // 밝기 배수(0~1, 낮을수록 덜 강조) — 튜너로 확정
 
 // 색 그라디언트용 깊이 기준
 const C = 0.64

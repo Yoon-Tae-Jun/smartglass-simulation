@@ -1,8 +1,14 @@
 import { useMemo, useRef } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree, extend } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
+
+// three 예제의 fat-line 클래스들을 JSX 요소로 사용 가능하게 등록
+extend({ LineSegments2, LineSegmentsGeometry, LineMaterial })
 
 // 안경 GLB (Glasses by jeremy, CC-BY 3.0 · poly.pizza)
 const GLASSES_URL = '/glasses/glasses.glb'
@@ -18,7 +24,8 @@ const GLASSES_ROT = [-0.112, 3.138, -0.002] // 렌즈가 -Z라 ~180°(+살짝 �
 
 const LINE_COLOR = '#7fd4ff' // 네온 시안
 const EDGE_ANGLE = 24 // EdgesGeometry 임계각(도): 낮을수록 라인 많아짐
-const GLASS_GLOW = 3.0 // 글로 세기 배수(강조도) — 튜너로 확정
+const GLASS_GLOW = 4.7 // 글로 세기 배수(강조도) — HDR 컬러 배율, 블룸이 이 밝기를 잡아 발광
+const LINE_WIDTH = 0.004 // fat-line 두께(월드 단위) — 튜너로 확정
 
 // 안경다리(temple arm) 길이 배율. 경첩(프레임 앞부분과 다리의 경계) 뒤쪽 정점만
 // z로 늘려 렌즈·프레임은 그대로 두고 귀까지 가는 직선 막대만 길게 만든다.
@@ -77,10 +84,13 @@ function buildEdges(scene, armLen, lensScale) {
   return new THREE.EdgesGeometry(merged, EDGE_ANGLE)
 }
 
+// HDR 발광용 기준 컬러(선형). useFrame에서 glow 배율을 곱해 1을 넘겨 → 블룸이 걸린다.
+const BASE_COLOR = new THREE.Color(LINE_COLOR)
+
 export default function Glasses({ tune }) {
   const { scene } = useGLTF(GLASSES_URL)
+  const size = useThree((s) => s.size)
   const coreMat = useRef()
-  const haloMat = useRef()
 
   const armLen = tune ? tune.armLen : ARM_LEN
   const lensScale = tune ? tune.lensScale : LENS_SCALE
@@ -88,6 +98,13 @@ export default function Glasses({ tune }) {
     () => buildEdges(scene, armLen, lensScale),
     [scene, armLen, lensScale],
   )
+
+  // EdgesGeometry의 position(세그먼트 쌍 배열)을 fat-line 지오메트리로 변환
+  const lineGeo = useMemo(() => {
+    const g = new LineSegmentsGeometry()
+    g.setPositions(edges.attributes.position.array)
+    return g
+  }, [edges])
 
   // 개발 튜너가 값을 주면 그걸 쓰고, 없으면 상수 사용
   const pos = tune ? [tune.px, tune.py, tune.pz] : GLASSES_POS
@@ -98,40 +115,34 @@ export default function Glasses({ tune }) {
   const scl = [base * width, base, base]
 
   const glow = tune ? tune.glassGlow : GLASS_GLOW
+  const lineWidth = tune ? tune.lineWidth : LINE_WIDTH
 
-  // 은은한 글로 맥동: '작동 중인 AR 기기' 느낌
+  // 발광 맥동: HDR 컬러 밝기를 흔들어 '작동 중인 AR 기기'처럼 은은히 숨쉬게 → 블룸이 함께 요동
   useFrame((state) => {
     const t = state.clock.elapsedTime
-    const pulse = 0.5 + 0.5 * Math.sin(t * 2.2)
-    if (coreMat.current) coreMat.current.opacity = Math.min(1, (0.55 + 0.35 * pulse) * glow)
-    // 헤일로는 글로 세기에 덜 민감하게(sqrt) → 강조도 올려도 두 번째 윤곽처럼 안 보이게
-    if (haloMat.current) haloMat.current.opacity = Math.min(0.5, (0.05 + 0.08 * pulse) * Math.sqrt(glow))
+    const pulse = 0.85 + 0.15 * Math.sin(t * 2.2)
+    if (coreMat.current) {
+      const k = glow * pulse
+      coreMat.current.color.setRGB(BASE_COLOR.r * k, BASE_COLOR.g * k, BASE_COLOR.b * k)
+    }
   })
 
   return (
     <group position={pos} rotation={rot} scale={scl}>
-      {/* 헤일로: 코어에 바짝 붙인 저투명 라인으로 가짜 블룸(윤곽 겹침 방지) */}
-      <lineSegments geometry={edges} scale={1.02}>
-        <lineBasicMaterial
-          ref={haloMat}
-          color={LINE_COLOR}
-          transparent
-          opacity={0.18}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-        />
-      </lineSegments>
-      {/* 코어 네온 라인 */}
-      <lineSegments geometry={edges}>
-        <lineBasicMaterial
+      {/* 코어 네온 라인(fat line): 월드 단위 두께로 실제 굵기를 가지며 HDR 컬러로 블룸을 유발 */}
+      <lineSegments2 geometry={lineGeo}>
+        <lineMaterial
           ref={coreMat}
           color={LINE_COLOR}
+          linewidth={lineWidth}
+          worldUnits
+          resolution={[size.width, size.height]}
           transparent
-          opacity={0.85}
+          toneMapped={false}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
         />
-      </lineSegments>
+      </lineSegments2>
     </group>
   )
 }

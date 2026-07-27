@@ -25,7 +25,8 @@ const EMPHASIS = [
   { key: 'headCount', label: '머리 개수', min: 5000, max: 90000, step: 1000 },
   { key: 'headSize', label: '머리 크기', min: 0.004, max: 0.03, step: 0.001 },
   { key: 'headBright', label: '머리 밝기', min: 0.15, max: 1.0, step: 0.05 },
-  { key: 'glassGlow', label: '안경 글로', min: 0.5, max: 3.0, step: 0.1 },
+  { key: 'glassGlow', label: '안경 글로', min: 0.5, max: 12.0, step: 0.1 },
+  { key: 'lineWidth', label: '안경 두께', min: 0.004, max: 0.04, step: 0.001 },
 ]
 
 const fmt = (v, step) =>
@@ -62,7 +63,8 @@ export default function GlassesTuner({ tune, onChange }) {
     `const ARM_LEN = ${tune.armLen.toFixed(2)}\n` +
     `const LENS_SCALE = ${tune.lensScale.toFixed(2)}\n` +
     `const GLASSES_ROT = [${tune.rx.toFixed(3)}, ${tune.ry.toFixed(3)}, ${tune.rz.toFixed(3)}]\n` +
-    `const GLASS_GLOW = ${tune.glassGlow.toFixed(1)}\n\n` +
+    `const GLASS_GLOW = ${tune.glassGlow.toFixed(1)}\n` +
+    `const LINE_WIDTH = ${tune.lineWidth.toFixed(3)}\n\n` +
     `// PointCloudHead.jsx\n` +
     `const HEAD_COUNT = ${Math.round(tune.headCount)}\n` +
     `const HEAD_SIZE = ${tune.headSize.toFixed(3)}\n` +
