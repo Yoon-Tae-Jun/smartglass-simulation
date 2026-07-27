@@ -5,10 +5,20 @@ const TRANSFORM = [
   { key: 'px', label: 'pos X', min: -0.6, max: 0.6, step: 0.005 },
   { key: 'py', label: 'pos Y', min: -0.6, max: 0.9, step: 0.005 },
   { key: 'pz', label: 'pos Z', min: -0.3, max: 1.0, step: 0.005 },
-  { key: 'scale', label: 'scale', min: 0.05, max: 1.6, step: 0.01 },
+  { key: 'scale', label: 'scale', min: 0.05, max: 1.8, step: 0.01 },
+  { key: 'width', label: '가로폭', min: 0.6, max: 2.0, step: 0.01 },
+  { key: 'armLen', label: '다리길이', min: 1.0, max: 3.0, step: 0.02 },
+  { key: 'lensScale', label: '안경알', min: 0.5, max: 1.3, step: 0.01 },
   { key: 'rx', label: 'rot X', min: -Math.PI, max: Math.PI, step: 0.01 },
   { key: 'ry', label: 'rot Y', min: -Math.PI, max: Math.PI, step: 0.01 },
   { key: 'rz', label: 'rot Z', min: -Math.PI, max: Math.PI, step: 0.01 },
+]
+
+const CAMERA = [
+  { key: 'camX', label: '카메라X', min: -2.5, max: 2.5, step: 0.01 },
+  { key: 'camY', label: '카메라Y', min: -1.5, max: 2.0, step: 0.01 },
+  { key: 'camZ', label: '카메라Z', min: 0.5, max: 6.0, step: 0.05 },
+  { key: 'endZ', label: '줌거리', min: 0.4, max: 2.0, step: 0.05 },
 ]
 
 const EMPHASIS = [
@@ -48,12 +58,19 @@ export default function GlassesTuner({ tune, onChange }) {
     `// Glasses.jsx\n` +
     `const GLASSES_POS = [${tune.px.toFixed(3)}, ${tune.py.toFixed(3)}, ${tune.pz.toFixed(3)}]\n` +
     `const GLASSES_SCALE = ${tune.scale.toFixed(3)}\n` +
+    `const GLASSES_WIDTH = ${tune.width.toFixed(3)}\n` +
+    `const ARM_LEN = ${tune.armLen.toFixed(2)}\n` +
+    `const LENS_SCALE = ${tune.lensScale.toFixed(2)}\n` +
     `const GLASSES_ROT = [${tune.rx.toFixed(3)}, ${tune.ry.toFixed(3)}, ${tune.rz.toFixed(3)}]\n` +
     `const GLASS_GLOW = ${tune.glassGlow.toFixed(1)}\n\n` +
     `// PointCloudHead.jsx\n` +
     `const HEAD_COUNT = ${Math.round(tune.headCount)}\n` +
     `const HEAD_SIZE = ${tune.headSize.toFixed(3)}\n` +
-    `const HEAD_BRIGHT = ${tune.headBright.toFixed(2)}`
+    `const HEAD_BRIGHT = ${tune.headBright.toFixed(2)}\n\n` +
+    `// 시작 카메라: Home.jsx camera position + PointCloudHead camX/Y/Z 폴백\n` +
+    `camera position = [${tune.camX.toFixed(2)}, ${tune.camY.toFixed(2)}, ${tune.camZ.toFixed(2)}]\n` +
+    `// OrbitControls target 은 머리 중심 [0, 0.1, 0] 고정\n` +
+    `endCamZ(줌거리) = ${tune.endZ.toFixed(2)}`
 
   return (
     <div
@@ -73,6 +90,11 @@ export default function GlassesTuner({ tune, onChange }) {
 
       <div className="mb-1 text-[10px] text-white/40">위치 / 스케일 / 회전</div>
       {TRANSFORM.map((r) => (
+        <Slider key={r.key} row={r} tune={tune} set={set} />
+      ))}
+
+      <div className="mb-1 mt-2 text-[10px] text-white/40">시작 카메라 / 줌</div>
+      {CAMERA.map((r) => (
         <Slider key={r.key} row={r} tune={tune} set={set} />
       ))}
 

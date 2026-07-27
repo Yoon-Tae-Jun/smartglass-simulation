@@ -15,7 +15,7 @@ export default function Simulation() {
       <header className="border-b border-white/10">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
           <Link to="/" className="font-mono text-sm font-bold tracking-tight">
-            ← SMARTGLASS
+            ← NAY-BEN
           </Link>
           <span className="eyebrow text-white/50">SIMULATION</span>
         </div>
