@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react'
 
 // 웹캠(getUserMedia) 실시간 표시 (FR-SYS-1).
-// - 마운트 시 카메라 스트림을 열고 <video>에 연결
-// - 언마운트 시 track 정지(카메라 LED off)
+// - 마운트/deviceId 변경 시 카메라 스트림을 열고 <video>에 연결
+// - 언마운트·전환 시 이전 track 정지(카메라 LED off)
 // - 권한 거부/실패 시 공통 포맷 { status, msg }로 에러 오버레이 (FR-SYS-6)
-// ref.capture() 로 현재 프레임을 dataURL로 캡처(이미지 번역용).
-const WebcamView = forwardRef(function WebcamView(_props, ref) {
+// - 권한 허용 후 연결된 카메라 목록을 onDevices로 부모에 전달(선택 UI용)
+// props:
+//   deviceId  선택된 카메라 deviceId (없으면 후면 선호 기본값)
+//   onDevices (devices[]) => void  videoinput 장치 목록 콜백
+// ref.capture()  현재 프레임을 dataURL로 캡처(이미지 번역용)
+const WebcamView = forwardRef(function WebcamView({ deviceId, onDevices }, ref) {
   const videoRef = useRef(null)
   const [error, setError] = useState(null) // { status, msg }
 
@@ -31,13 +35,22 @@ const WebcamView = forwardRef(function WebcamView(_props, ref) {
         return
       }
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+        const video = deviceId
+          ? { deviceId: { exact: deviceId } }
+          : { facingMode: 'environment' }
+        stream = await navigator.mediaDevices.getUserMedia({ video, audio: false })
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop())
           return
         }
+        setError(null)
         if (videoRef.current) {
           videoRef.current.srcObject = stream
+        }
+        // 권한 허용 후에야 장치 라벨이 채워짐 → 목록 갱신
+        if (onDevices) {
+          const devices = await navigator.mediaDevices.enumerateDevices()
+          if (!cancelled) onDevices(devices.filter((d) => d.kind === 'videoinput'))
         }
       } catch (e) {
         setError({
@@ -52,7 +65,7 @@ const WebcamView = forwardRef(function WebcamView(_props, ref) {
       cancelled = true
       if (stream) stream.getTracks().forEach((t) => t.stop())
     }
-  }, [])
+  }, [deviceId, onDevices])
 
   return (
     <div className="absolute inset-0 bg-black">
