@@ -1,0 +1,10 @@
+grpcio
+grpcio-tools
+fastapi
+uvicorn[standard]
+websockets
+numpy
+python-dotenv
+sounddevice
+requests
+python-multipart
