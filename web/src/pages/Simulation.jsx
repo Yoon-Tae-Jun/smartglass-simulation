@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import WebcamView from '../components/sim/WebcamView.jsx'
-import FeatureBar from '../components/sim/FeatureBar.jsx'
+import TempleRail from '../components/sim/TempleRail.jsx'
 import SettingsPanel from '../components/sim/SettingsPanel.jsx'
 import TranslateOverlay from '../components/sim/overlays/TranslateOverlay.jsx'
 import ImageTranslateOverlay from '../components/sim/overlays/ImageTranslateOverlay.jsx'
@@ -15,6 +15,16 @@ const FEATURE_LABEL = {
   qa: '질문 응답',
 }
 
+// 안경 다리에 배치할 기능 — 좌: 번역·이미지 / 우: 길찾기·Q&A
+const LEFT_FEATURES = [
+  { key: 'translate', label: '실시간 번역', icon: '💬' },
+  { key: 'image', label: '이미지 번역', icon: '🖼️' },
+]
+const RIGHT_FEATURES = [
+  { key: 'map', label: '길찾기', icon: '🧭' },
+  { key: 'qa', label: '질문 응답', icon: '🎙️' },
+]
+
 export default function Simulation() {
   // 한 번에 주 기능 1개만 활성 (FR-SYS-3)
   const [activeFeature, setActiveFeature] = useState(null)
@@ -27,7 +37,16 @@ export default function Simulation() {
   })
   const [cameras, setCameras] = useState([]) // 연결된 videoinput 장치 목록
   const [selectedCamera, setSelectedCamera] = useState('') // 선택된 deviceId ('' = 기본)
+  const [settingsOpen, setSettingsOpen] = useState(false) // 상단 ⚙ 설정 팝오버
   const webcamRef = useRef(null)
+
+  // 설정 팝오버: ESC로 닫기
+  useEffect(() => {
+    if (!settingsOpen) return
+    const onKey = (e) => e.key === 'Escape' && setSettingsOpen(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [settingsOpen])
 
   // 버튼 토글 (FR-SYS-4): 같은 기능이면 off, 다르면 교체
   function handleToggle(key) {
@@ -64,19 +83,63 @@ export default function Simulation() {
       />
 
       {/* 상단 바 */}
-      <header className="relative z-10 flex items-center justify-between border-b border-white/10 px-6 py-4">
+      <header className="relative z-30 flex items-center justify-between border-b border-white/10 px-6 py-4">
         <Link
           to="/"
           className="font-display text-lg font-bold tracking-tight text-white/90 hover:text-white sm:text-xl"
         >
           ← NAY-BEN<span className="text-sky">.</span>
         </Link>
-        <span className="eyebrow text-white/50">SIMULATION</span>
+
+        <div className="flex items-center gap-4">
+          <span className="eyebrow text-white/50">SIMULATION</span>
+
+          {/* 설정 톱니 + 팝오버 */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen((v) => !v)}
+              aria-label="설정"
+              aria-expanded={settingsOpen}
+              className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition-all ${
+                settingsOpen
+                  ? 'border-sky bg-sky/15 text-sky-bright shadow-[0_0_18px_rgba(45,169,239,0.4)]'
+                  : 'border-white/15 text-white/70 hover:border-white/30 hover:text-white'
+              }`}
+            >
+              ⚙
+            </button>
+
+            {settingsOpen && (
+              <>
+                {/* 바깥 클릭 감지용 오버레이 */}
+                <button
+                  type="button"
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onClick={() => setSettingsOpen(false)}
+                  className="fixed inset-0 z-30 cursor-default"
+                />
+                <div className="hud-chip absolute right-0 top-12 z-40 origin-top-right">
+                  <SettingsPanel
+                    active={activeFeature}
+                    settings={settings}
+                    onChange={setSettings}
+                    cameras={cameras}
+                    selectedCamera={selectedCamera}
+                    onSelectCamera={setSelectedCamera}
+                    onClose={() => setSettingsOpen(false)}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </header>
 
-      {/* 본문: 좌(기능) · 중앙(캠 뷰포트) · 우(설정) */}
-      <main className="relative z-10 flex flex-1 items-center justify-center gap-6 px-6 py-6">
-        <FeatureBar active={activeFeature} onToggle={handleToggle} />
+      {/* 본문: 안경 다리(좌) · 캠 뷰포트(중앙) · 안경 다리(우) 1인칭 시점 */}
+      <main className="relative z-10 flex flex-1 items-center justify-center gap-4 px-6 py-6 sm:gap-6">
+        <TempleRail side="left" features={LEFT_FEATURES} active={activeFeature} onToggle={handleToggle} />
 
         {/* 중앙 스마트글래스 뷰포트 */}
         <section className="flex h-full flex-1 items-center justify-center">
@@ -99,14 +162,7 @@ export default function Simulation() {
           </div>
         </section>
 
-        <SettingsPanel
-          active={activeFeature}
-          settings={settings}
-          onChange={setSettings}
-          cameras={cameras}
-          selectedCamera={selectedCamera}
-          onSelectCamera={setSelectedCamera}
-        />
+        <TempleRail side="right" features={RIGHT_FEATURES} active={activeFeature} onToggle={handleToggle} />
       </main>
     </div>
   )

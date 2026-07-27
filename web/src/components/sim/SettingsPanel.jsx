@@ -1,4 +1,4 @@
-// 우측 설정 / 상태 패널.
+// 설정 / 상태 패널 (상단 톱바 ⚙ 버튼이 여는 팝오버 콘텐츠).
 // 현재 활성 기능 상태를 보여주고, 기능별 설정(번역 언어, TTS 등)을 조정한다.
 // 설정값은 아직 mock 파이프라인에 직접 연결되지 않았으나, 백엔드 연동 시
 // startTranslateStream / askQuestion 등에 전달할 자리다.
@@ -27,11 +27,27 @@ export default function SettingsPanel({
   cameras = [],
   selectedCamera = '',
   onSelectCamera,
+  onClose,
 }) {
   const set = (patch) => onChange({ ...settings, ...patch })
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col gap-4">
+    <div className="flex w-64 flex-col gap-4">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <span className="eyebrow text-white/50">설정</span>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="설정 닫기"
+            className="rounded-lg px-2 py-0.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
       {/* 상태 */}
       <div className="rounded-xl border border-white/10 bg-navy-deep/60 p-4">
         <span className="eyebrow text-white/40">상태</span>
@@ -44,12 +60,10 @@ export default function SettingsPanel({
         <p className="mt-2 text-xs leading-relaxed text-white/50">{FEATURE_META[active ?? 'null']}</p>
       </div>
 
-      {/* 설정 */}
+      {/* 컨트롤 */}
       <div className="rounded-xl border border-white/10 bg-navy-deep/60 p-4">
-        <span className="eyebrow text-white/40">설정</span>
-
         {/* 여행 지역 (현재 서울만 지원, 나머지는 확장 예정) */}
-        <label className="mt-3 block">
+        <label className="block">
           <span className="text-xs text-white/50">여행 지역</span>
           <select
             value={settings.region}
@@ -137,6 +151,6 @@ export default function SettingsPanel({
           </span>
         </button>
       </div>
-    </aside>
+    </div>
   )
 }

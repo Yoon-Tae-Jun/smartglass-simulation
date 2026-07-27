@@ -97,3 +97,51 @@ body {
 /* 시뮬레이션 진입 시 밝은 화면에서 서서히 드러남 */
 @keyframes sim-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
 .sim-flash { animation: sim-flash 0.9s ease-out forwards; }
+
+/* ── 스마트글래스 안경 다리(temple) 레일 ────────────────────
+   중앙 캠을 감싸는 좌/우 세로 레일. 금속/다크 유리 질감 + 안쪽으로
+   살짝 기운 원근감으로 "안경을 낀 1인칭 시점"을 연출한다. */
+.temple-rail {
+  background:
+    linear-gradient(180deg, rgba(45, 169, 239, 0.08), transparent 22%, transparent 78%, rgba(45, 169, 239, 0.08)),
+    linear-gradient(90deg, #0a1a24, #0d222e 45%, #081620);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 0 24px rgba(0, 0, 0, 0.55),
+    0 18px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+}
+/* 얼굴 쪽(안쪽)으로 기운 느낌: 좌측 레일은 오른쪽 모서리를, 우측은 왼쪽을 살짝 밀어 넣음 */
+.temple-rail--left  { transform: perspective(900px) rotateY(14deg);  transform-origin: right center; }
+.temple-rail--right { transform: perspective(900px) rotateY(-14deg); transform-origin: left center; }
+
+/* 힌지(경첩) 장식 — 레일이 프레임과 맞물리는 지점 */
+.temple-hinge {
+  background: radial-gradient(circle at 50% 35%, #3a5566, #16303e 60%, #0a1c26);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* 다리에 박힌 물리 버튼. 기본은 볼록, 누르면 안으로 눌리고 파랗게 발광 */
+.temple-btn {
+  background: linear-gradient(180deg, #16313f, #0c2028);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.5),
+    0 3px 6px rgba(0, 0, 0, 0.45);
+  transition: transform 0.08s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.temple-btn:hover { background: linear-gradient(180deg, #1b3b4c, #0e2530); }
+.temple-btn:active { transform: translateY(2px) scale(0.97); }
+.temple-btn:focus-visible { outline: 2px solid var(--color-sky-bright); outline-offset: 2px; }
+/* 활성(선택)된 버튼: 안으로 눌린 상태 + 파란 발광 링 */
+.temple-btn--on {
+  background: linear-gradient(180deg, #0d2a3a, #0a222e);
+  border-color: rgba(86, 194, 255, 0.7);
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(45, 169, 239, 0.5),
+    0 0 22px rgba(45, 169, 239, 0.55);
+}
+.temple-btn--on:active { transform: translateY(1px) scale(0.98); }
