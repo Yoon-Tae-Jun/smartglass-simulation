@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><title>STT 테스트</title>
+<style>body{font-family:sans-serif;padding:24px}#partial{color:#888}button{padding:10px 18px;font-size:15px;margin-right:8px}</style>
+</head><body>
+<h2>🎤 STT WebSocket 테스트</h2>
+<button id="startBtn">시작</button>
+<button id="stopBtn" disabled>정지</button>
+<p>중간 인식: <span id="partial"></span></p>
+<div id="finals"></div>
+<script>
+let ws, ctx, proc, stream, mute;
+const partialEl = document.getElementById('partial');
+const finalsEl  = document.getElementById('finals');
+
+document.getElementById('startBtn').onclick = async () => {
+  ws = new WebSocket(`ws://${location.host}/ws/stt`);
+  ws.binaryType = "arraybuffer";
+  ws.onmessage = (ev) => {
+    const r = JSON.parse(ev.data);
+    if (r.type === 'partial') partialEl.textContent = r.text;
+    else if (r.type === 'final') {
+      const p = document.createElement('p'); p.textContent = '✅ ' + r.text;
+      finalsEl.appendChild(p); partialEl.textContent = '';
+    } else if (r.type === 'wake') {
+      const p = document.createElement('p'); p.style.color = '#1a73e8';
+      p.textContent = '🗝️ 기능 호출: ' + r.feature; finalsEl.appendChild(p);
+    }
+  };
+  ws.onopen = async () => {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    ctx = new AudioContext();
+    const src = ctx.createMediaStreamSource(stream);
+    proc = ctx.createScriptProcessor(4096, 1, 1);
+    mute = ctx.createGain(); mute.gain.value = 0;         // 스피커 피드백 방지
+    src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+    proc.onaudioprocess = (e) => {
+      const f32 = e.inputBuffer.getChannelData(0);
+      const ds  = downsampleTo16k(f32, ctx.sampleRate);
+      const pcm = floatTo16BitPCM(ds);
+      if (ws.readyState === 1) ws.send(pcm);
+    };
+  };
+  startBtn.disabled = true; stopBtn.disabled = false;
+};
+
+document.getElementById('stopBtn').onclick = () => {
+  if (proc) proc.disconnect();
+  if (ctx) ctx.close();
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (ws && ws.readyState === 1) { ws.send(JSON.stringify({action:'stop'})); ws.close(); }
+  startBtn.disabled = false; stopBtn.disabled = true;
+};
+
+function downsampleTo16k(buffer, inRate){
+  const outRate = 16000;
+  if (inRate === outRate) return buffer;
+  const ratio = inRate / outRate, newLen = Math.round(buffer.length / ratio);
+  const result = new Float32Array(newLen);
+  let oR = 0, oB = 0;
+  while (oR < newLen){
+    const next = Math.round((oR + 1) * ratio);
+    let acc = 0, cnt = 0;
+    for (let i = oB; i < next && i < buffer.length; i++){ acc += buffer[i]; cnt++; }
+    result[oR++] = acc / (cnt || 1); oB = next;
+  }
+  return result;
+}
+function floatTo16BitPCM(input){
+  const out = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i++){
+    let s = Math.max(-1, Math.min(1, input[i]));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+  return out.buffer;
+}
+</script>
+</body></html>
