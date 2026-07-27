@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getDirections } from '../../../lib/simApi.js'
+import RouteMiniMap from './RouteMiniMap.jsx'
 
 // 길찾기 경로/시간/거리 오버레이 (FR-MAP-5).
 // 화면에 뜨는 값은 전부 서버 응답(DirectionsData)에서 온다.
@@ -13,6 +14,37 @@ const fmtDuration = (ms) => {
   const min = Math.round(ms / 60000)
   if (min < 60) return `${min}분`
   return `${Math.floor(min / 60)}시간 ${min % 60}분`
+}
+
+// 인식 문장에서 출발지/목적지를 뽑아 섹션 제목("출발 → 목적지")을 만든다.
+// 서버(service.py extract_places)와 같은 규칙 — 서버 응답에 지명이 없어서 프론트에서 재파싱한다.
+const ROUTE_PATTERNS = [
+  /(?<origin>.+?)에서\s*(?<destination>.+?)(?:까지|으로|로)(?=\s|$|[.,?!])/,
+  /(?<origin>.+?)에서\s*(?<destination>.+?)\s*(?:가는 길|어떻게 가|안내|경로)/,
+  /(?<destination>.+?)(?:까지|으로|로)(?=\s|$|[.,?!])/,
+  /(?<destination>.+?)\s*(?:가는 길|어떻게 가|안내|경로)/,
+]
+const FILLER_PREFIXES = ['지금', '나', '저', '우리', '야', '여기서', '현재 위치', '현재위치']
+
+const cleanPlace = (place) => {
+  if (!place) return null
+  let p = place.trim()
+  for (const filler of FILLER_PREFIXES) {
+    if (p.startsWith(filler)) p = p.slice(filler.length).trim()
+  }
+  return p || null
+}
+
+// 문장에서 { origin, destination } 추출. 목적지를 못 찾으면 null.
+const extractPlaces = (text) => {
+  if (!text) return null
+  for (const pattern of ROUTE_PATTERNS) {
+    const match = text.match(pattern)
+    if (!match) continue
+    const destination = cleanPlace(match.groups.destination)
+    if (destination) return { origin: cleanPlace(match.groups.origin), destination }
+  }
+  return null
 }
 
 export default function MapOverlay({
@@ -46,12 +78,26 @@ export default function MapOverlay({
   // 명령은 들어왔는데 아직 결과가 없는 상태 = 서버가 경로를 조회하는 중
   const pending = Boolean(request || (origin && destination))
 
+  // 섹션 제목용 출발/목적지: 명시적 props 우선, 없으면 인식 문장에서 파싱
+  const parsed = origin && destination ? { origin, destination } : extractPlaces(request)
+  const routeDest = parsed?.destination ?? null
+  // 출발지를 못 알아들은 경우(목적지만 말함)엔 현재 위치가 출발지
+  const routeOrigin = parsed?.origin ?? '현재 위치'
+
   return (
-    <div className="pointer-events-none absolute right-4 top-14 z-20 w-[280px]">
+    <div className="pointer-events-none absolute right-4 top-14 z-20 w-[300px]">
       <div className="hud-chip">
         <span className="eyebrow text-sky/70">길찾기</span>
 
-        {request && <p className="mt-1 text-sm text-white/60">“{request}”</p>}
+        {routeDest ? (
+          <p className="mt-1 flex items-center gap-1.5 text-sm font-medium">
+            <span className="text-white/70">{routeOrigin}</span>
+            <span className="text-sky">→</span>
+            <span className="text-white">{routeDest}</span>
+          </p>
+        ) : (
+          request && <p className="mt-1 text-sm text-white/60">“{request}”</p>
+        )}
 
         {err && <p className="mt-3 text-sm text-white/70">{err}</p>}
 
@@ -63,6 +109,12 @@ export default function MapOverlay({
 
         {!err && data && (
           <>
+            {data.path?.length >= 2 && (
+              <div className="mt-3">
+                <RouteMiniMap path={data.path} />
+              </div>
+            )}
+
             <div className="mt-3 flex items-end gap-4">
               <div>
                 <p className="font-display text-3xl font-bold text-white">
