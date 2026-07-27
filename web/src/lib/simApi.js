@@ -26,6 +26,20 @@ export async function getDirections({ origin, destination }) {
   }
 }
 
+// ── 현재 위치 (F-MAP 출발지) ──────────────────────────────────
+// 브라우저 Geolocation → { lat, lng }. 미지원·거부·타임아웃이면 null.
+// 좌표를 못 넘기면 목적지만 말한 길찾기는 서버가 400으로 돌려준다.
+export function getCurrentLocation({ timeout = 8000 } = {}) {
+  if (!navigator.geolocation) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null), // 거부/실패도 좌표 없음으로 취급하고 인식은 계속한다
+      { enableHighAccuracy: true, timeout, maximumAge: 60_000 },
+    )
+  })
+}
+
 // ── 음성 명령 (WS /stt/ws, 실연동) ─────────────────────────────
 // 서버 BaseResponse → 프론트 이벤트로 정규화.
 // data.type 있으면 인식 이벤트(partial|final|wake), 없으면 기능 실행 결과.
@@ -40,10 +54,15 @@ function normalizeStt(res) {
 
 // 마이크 오디오를 16kHz PCM으로 서버에 스트리밍하고, 서버가 보내는
 // 인식 자막 / 명령어 감지(wake) / 기능 실행 결과를 onEvent로 흘려보낸다.
-// origin: 현재 위치(도로명 주소) — navigate 출발지. 반환값 .stop() 으로 종료.
-export function startVoiceCommand({ origin, language = 'ko', execute = true, onEvent }) {
+// location: 현재 위치 좌표 { lat, lng } — 목적지만 말했을 때 navigate 출발지로
+// 쓰인다(서버가 도로명 주소로 역변환). 반환값 .stop() 으로 종료.
+export function startVoiceCommand({ location, language = 'ko', execute = true, onEvent }) {
   const params = new URLSearchParams({ language, execute: String(execute) })
-  if (origin) params.set('origin', origin)
+  // 서버는 lat/lng가 둘 다 있어야 현재 위치로 인정한다
+  if (location?.lat != null && location?.lng != null) {
+    params.set('lat', String(location.lat))
+    params.set('lng', String(location.lng))
+  }
 
   const ws = new WebSocket(`${WS_BASE}/stt/ws?${params.toString()}`)
   ws.binaryType = 'arraybuffer'

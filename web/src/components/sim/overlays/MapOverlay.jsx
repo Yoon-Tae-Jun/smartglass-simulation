@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { getDirections } from '../../../lib/simApi.js'
 
 // 길찾기 경로/시간/거리 오버레이 (FR-MAP-5).
-// 실제 흐름은 STT→LLM(목적지 추출)→map 이지만, 프론트에서는 목적지가 확정된
-// 뒤 map 결과(DirectionsData)를 소비해 오버레이만 렌더한다.
-// TODO(윤태준): getDirections 내부를 POST /map/directions 로 교체.
-// TODO(지유찬·박찬영): 음성→목적지 추출 결과를 origin/destination으로 주입.
+// 화면에 뜨는 값은 전부 서버 응답(DirectionsData)에서 온다.
+//  - request/error: WS 음성 명령의 인식 문장과 실행 실패 사유
+//  - directions:    WS 기능 실행 결과 (이미 받은 경로라 다시 조회하지 않는다)
+//  - origin/destination: 둘 다 주어지면 POST /map/directions로 직접 조회
+// 서버 응답에는 지명이 없어서, 어디로 가는 경로인지는 인식된 문장으로 표시한다.
 
 const fmtDistance = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${m}m`)
 const fmtDuration = (ms) => {
@@ -15,46 +16,52 @@ const fmtDuration = (ms) => {
 }
 
 export default function MapOverlay({
-  origin = '서울특별시 중구 세종대로 110',
-  destination = '경복궁',
   directions = null,
+  request = null,
+  error = null,
+  origin = null,
+  destination = null,
 }) {
-  const [data, setData] = useState(directions)
-  const [err, setErr] = useState(null)
+  const [fetched, setFetched] = useState(null)
+  const [fetchError, setFetchError] = useState(null)
 
   useEffect(() => {
-    // 음성 명령으로 이미 받은 경로가 있으면 그대로 사용 (재요청 안 함)
-    if (directions) {
-      setData(directions)
-      setErr(null)
-      return
-    }
+    // 음성으로 받은 경로가 있거나 조회할 지명이 없으면 REST를 호출하지 않는다
+    if (directions || !origin || !destination) return
     let alive = true
-    setData(null)
-    setErr(null)
+    setFetched(null)
+    setFetchError(null)
     getDirections({ origin, destination }).then((res) => {
       if (!alive) return
-      if (res.status === 200 && res.data) setData(res.data)
-      else setErr(res.msg) // FR-MAP-6: 실패 시 msg 표시
+      if (res.status === 200 && res.data) setFetched(res.data)
+      else setFetchError(res.msg) // FR-MAP-6: 실패 시 서버 msg 표시
     })
     return () => {
       alive = false
     }
   }, [origin, destination, directions])
 
+  const data = directions ?? fetched
+  const err = error ?? fetchError
+  // 명령은 들어왔는데 아직 결과가 없는 상태 = 서버가 경로를 조회하는 중
+  const pending = Boolean(request || (origin && destination))
+
   return (
     <div className="pointer-events-none absolute right-4 top-14 z-20 w-[280px]">
       <div className="hud-chip">
         <span className="eyebrow text-sky/70">길찾기</span>
-        <p className="mt-1 truncate text-sm text-white/60">
-          {origin} <span className="text-sky">→</span> {destination}
-        </p>
 
-        {err && <p className="mt-3 text-sm text-white/70">경로를 찾을 수 없습니다: {err}</p>}
+        {request && <p className="mt-1 text-sm text-white/60">“{request}”</p>}
 
-        {!err && !data && <p className="mt-3 text-white/60 glow-pulse">경로 계산 중…</p>}
+        {err && <p className="mt-3 text-sm text-white/70">{err}</p>}
 
-        {data && (
+        {!err && !data && (
+          <p className={`mt-3 text-white/60 ${pending ? 'glow-pulse' : ''}`}>
+            {pending ? '경로 계산 중…' : '음성으로 목적지를 말해 주세요'}
+          </p>
+        )}
+
+        {!err && data && (
           <>
             <div className="mt-3 flex items-end gap-4">
               <div>

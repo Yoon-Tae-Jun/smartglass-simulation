@@ -7,7 +7,7 @@ import TranslateOverlay from '../components/sim/overlays/TranslateOverlay.jsx'
 import ImageTranslateOverlay from '../components/sim/overlays/ImageTranslateOverlay.jsx'
 import MapOverlay from '../components/sim/overlays/MapOverlay.jsx'
 import QaOverlay from '../components/sim/overlays/QaOverlay.jsx'
-import { startVoiceCommand } from '../lib/simApi.js'
+import { getCurrentLocation, startVoiceCommand } from '../lib/simApi.js'
 
 const FEATURE_LABEL = {
   translate: '실시간 대화 번역',
@@ -18,8 +18,6 @@ const FEATURE_LABEL = {
 
 // 서버가 감지한 기능 이름 → 프론트 오버레이 key
 const FEATURE_KEY = { navigate: 'map', translate: 'translate', qa: 'qa' }
-// 데모 현재 위치(길찾기 출발지). API.md 검증 주소.
-const DEMO_ORIGIN = '서울특별시 중구 세종대로 110'
 
 // 안경 다리에 배치할 기능 — 좌: 번역·이미지 / 우: 길찾기·Q&A
 const LEFT_FEATURES = [
@@ -49,8 +47,12 @@ export default function Simulation() {
   // 음성 명령 (WS /stt/ws)
   const [listening, setListening] = useState(false)
   const [voiceCaption, setVoiceCaption] = useState(null) // { text, final } | { error }
+  const [command, setCommand] = useState(null) // 마지막 음성 명령 { text, feature }
+  const [commandError, setCommandError] = useState(null) // 기능 실행 실패 msg (501 등)
   const [voiceDirections, setVoiceDirections] = useState(null) // 음성 navigate 결과
   const voiceCtrl = useRef(null)
+  const commandRef = useRef(null) // 콜백 클로저에서 최신 명령을 참조
+  const sessionId = useRef(0) // 위치 조회를 기다리는 사이 취소됐는지 판별
 
   // 설정 팝오버: ESC로 닫기
   useEffect(() => {
@@ -61,7 +63,13 @@ export default function Simulation() {
   }, [settingsOpen])
 
   // 언마운트 시 음성 세션 정리
-  useEffect(() => () => voiceCtrl.current?.stop(), [])
+  useEffect(
+    () => () => {
+      sessionId.current += 1
+      voiceCtrl.current?.stop()
+    },
+    [],
+  )
 
   // 버튼 토글 (FR-SYS-4): 같은 기능이면 off, 다르면 교체
   function handleToggle(key) {
@@ -77,38 +85,77 @@ export default function Simulation() {
     })
   }
 
-  // 음성 이벤트 처리: 자막 갱신 / wake → 오버레이 활성 / navigate 결과 주입
+  // 마지막 명령을 상태와 ref에 함께 기록 (ref는 error 이벤트 분기용)
+  function rememberCommand(evt) {
+    const next = { text: evt.text, feature: evt.feature }
+    commandRef.current = next
+    setCommand(next)
+  }
+
+  // 음성 이벤트 처리: 자막 갱신 / wake → 오버레이 활성 / 실행 결과·실패 주입
   function handleVoiceEvent(evt) {
     if (evt.kind === 'partial' || evt.kind === 'final') {
       setVoiceCaption({ text: evt.text, final: evt.kind === 'final' })
     } else if (evt.kind === 'wake') {
+      // 새 명령이 시작됐으니 이전 결과는 비운다
+      rememberCommand(evt)
+      setCommandError(null)
+      setVoiceDirections(null)
       const key = FEATURE_KEY[evt.feature]
       if (key) setActiveFeature(key) // 음성으로 기능 호출
-    } else if (evt.kind === 'result' && evt.feature === 'navigate' && evt.data) {
-      setVoiceDirections(evt.data)
-      setActiveFeature('map')
+    } else if (evt.kind === 'result') {
+      rememberCommand(evt)
+      setCommandError(null)
+      if (evt.feature === 'navigate' && evt.data) {
+        setVoiceDirections(evt.data) // 서버가 조회한 경로 그대로 렌더
+        setActiveFeature('map')
+      }
     } else if (evt.kind === 'error') {
-      setVoiceCaption({ error: evt.msg })
+      // 연결·마이크 문제(0/403)는 자막에, 그 외는 실행 중인 기능의 실패로 본다
+      const connectionIssue = evt.status === 0 || evt.status === 403
+      if (connectionIssue || !commandRef.current) setVoiceCaption({ error: evt.msg })
+      else setCommandError(evt.msg)
     }
   }
 
   // 마이크 토글: 시작/정지
-  function toggleVoice() {
+  // 시작 전에 GPS 좌표를 받아 WS에 넘긴다 — 목적지만 말했을 때 서버가 출발지로 쓴다.
+  async function toggleVoice() {
     if (listening) {
+      sessionId.current += 1 // 위치 대기 중인 시작 요청 무효화
       voiceCtrl.current?.stop()
       voiceCtrl.current = null
       setListening(false)
       return
     }
-    setVoiceCaption(null)
+
+    const session = (sessionId.current += 1)
+    setVoiceCaption({ text: '현재 위치 확인 중…' })
     setVoiceDirections(null)
+    setCommandError(null)
+    setCommand(null)
+    commandRef.current = null
+    setListening(true)
+
+    const location = await getCurrentLocation()
+    if (session !== sessionId.current) return // 대기 중 사용자가 껐거나 화면을 떠남
+
+    // 좌표를 못 받아도 인식은 진행한다 ("○○에서 △△까지" 처럼 출발지를 말하면 됨)
+    setVoiceCaption(
+      location ? null : { error: '위치 권한이 없어 출발지를 함께 말해야 길찾기가 됩니다' },
+    )
     voiceCtrl.current = startVoiceCommand({
-      origin: DEMO_ORIGIN,
+      location,
       language: 'ko',
       onEvent: handleVoiceEvent,
     })
-    setListening(true)
   }
+
+  // 마지막 음성 명령이 지금 열려 있는 오버레이의 것일 때만 그 값을 넘긴다.
+  // (버튼으로 연 오버레이에 다른 기능의 문장/에러가 새는 걸 막는다)
+  const commandActive = command != null && FEATURE_KEY[command.feature] === activeFeature
+  const commandText = commandActive ? command.text : null
+  const activeError = commandActive ? commandError : null
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-navy-deep text-white">
@@ -217,11 +264,16 @@ export default function Simulation() {
 
             {/* 기능별 오버레이 (FR-SYS-2) — activeFeature 에 따라 하나만 렌더 */}
             {activeFeature === 'translate' && (
-              <TranslateOverlay langs={{ source: settings.sourceLang, target: settings.targetLang }} />
+              <TranslateOverlay
+                langs={{ source: settings.sourceLang, target: settings.targetLang }}
+                error={activeError}
+              />
             )}
             {activeFeature === 'image' && <ImageTranslateOverlay frameDataUrl={frameDataUrl} />}
-            {activeFeature === 'map' && <MapOverlay directions={voiceDirections} />}
-            {activeFeature === 'qa' && <QaOverlay />}
+            {activeFeature === 'map' && (
+              <MapOverlay directions={voiceDirections} request={commandText} error={activeError} />
+            )}
+            {activeFeature === 'qa' && <QaOverlay question={commandText} error={activeError} />}
 
             {/* 음성 인식 라이브 자막 */}
             {listening && (
