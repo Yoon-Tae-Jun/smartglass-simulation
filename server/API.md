@@ -8,8 +8,11 @@
 ## 목차
 - [공통 응답 포맷](#공통-응답-포맷)
 - [1. 음성 명령 — WebSocket `/stt/ws`](#1-음성-명령--websocket-sttws)
+  - [1-1. command 모드 (한국어 명령)](#1-1-command-모드-한국어-명령)
+  - [1-2. dialog 모드 (외국인 대화 번역)](#1-2-dialog-모드-외국인-대화-번역)
 - [2. 지도 REST](#2-지도-rest)
-- [3. 기타](#3-기타)
+- [3. 이미지 번역 REST](#3-이미지-번역-rest)
+- [4. 기타](#4-기타)
 - [기능(feature) 목록](#기능feature-목록)
 
 ---
@@ -47,7 +50,7 @@ if (body.status !== 200) showError(body.msg);
 
 ## 1. 음성 명령 — WebSocket `/stt/ws`
 
-**클라이언트가 쓰는 주 경로.** 소켓 하나로 자막부터 기능 실행 결과까지 다 받는다.
+**클라이언트가 쓰는 주 경로.** 소켓 하나로 자막·명령어 감지·기능 실행 결과·대화 번역을 전부 받는다.
 명령어 판별과 기능 실행(지도 호출 등)은 서버 내부에서 처리하므로 클라이언트가 따로 호출할 API는 없다.
 
 ```
@@ -58,11 +61,52 @@ ws://localhost:8000/stt/ws?language=ko&lat=37.5666103&lng=126.9783882
 
 | 이름 | 기본값 | 설명 |
 |---|---|---|
-| `language` | `ko` | 인식 언어 (`ko` / `en` / `ja`) |
+| `language` | `ko` | command 모드의 인식 언어 (`ko` / `en` / `ja`) |
 | `lat`, `lng` | 없음 | 현재 위치 좌표 (위도, 경도). 둘 다 있어야 인정된다 |
 | `execute` | `true` | `false`면 인식만 하고 기능은 실행하지 않는다 |
 
-### 길찾기 출발지 규칙
+### 보내는 것
+
+| 형식 | 내용 |
+|---|---|
+| 바이너리 프레임 | 16kHz · 모노 · 16bit PCM 오디오 청크 |
+| 텍스트 프레임 | `{"action": "stop"}` — 종료 요청 |
+
+### 두 가지 모드
+
+소켓 하나가 두 모드를 오간다. **모드가 바뀌면 서버가 `status` 이벤트로 알려준다.**
+
+| 모드 | 하는 일 | 인식 언어 |
+|---|---|---|
+| `command` (기본) | 한국어 명령어 감지 → 기능 실행 | 쿼리 `language` (기본 `ko`) |
+| `dialog` | 상대(외국인) 말을 인식해 한국어 번역을 함께 반환 | `en` 고정 → `ko` 번역 |
+
+```
+연결 → command
+  "외국인이랑 대화 번역해줘"  → status:"dialog"  → dialog 모드
+  "stop" 또는 "exit"          → status:"command" → command 모드
+```
+
+### 받는 것 (공통)
+
+메시지는 5종이고 전부 `BaseResponse`로 감싸여 있다.
+**`data.type`이 있으면 인식 이벤트(`partial`/`final`/`wake`/`status`), 없으면 기능 실행 결과다.**
+
+| `data.type` | 언제 | 주요 필드 |
+|---|---|---|
+| `partial` | 말하는 동안 계속 갱신 | `text`, (dialog) `translated` |
+| `final` | 침묵 감지로 문장 확정 | `text`, (dialog) `translated` |
+| `wake` | 확정 문장에서 기능이 잡혔을 때 | `text`, `feature` |
+| `status` | 모드가 바뀌었을 때 | `text` = `"dialog"` \| `"command"` |
+| (없음) | 기능 실행 결과 | `feature`, `text`, `data` |
+
+이벤트 객체는 항상 `type` / `text` / `feature` / `translated` 4개 키를 가진다. 해당 없는 값은 `null`로 온다.
+
+---
+
+### 1-1. command 모드 (한국어 명령)
+
+#### 길찾기 출발지 규칙
 
 | 사용자가 말한 내용 | 출발지 |
 |---|---|
@@ -72,59 +116,30 @@ ws://localhost:8000/stt/ws?language=ko&lat=37.5666103&lng=126.9783882
 
 좌표는 브라우저 `navigator.geolocation.getCurrentPosition()`으로 얻어서 연결 시 넘기면 된다.
 
-### 보내는 것
-
-| 형식 | 내용 |
-|---|---|
-| 바이너리 프레임 | 16kHz · 모노 · 16bit PCM 오디오 청크 |
-| 텍스트 프레임 | `{"action": "stop"}` — 종료 요청 |
-
-### 받는 것
-
-메시지는 4종이고, 전부 `BaseResponse`로 감싸여 있다.
-**`data.type`이 있으면 인식 이벤트, 없고 `data.feature`가 있으면 기능 실행 결과다.**
+#### 메시지 예시
 
 ```jsonc
 // ① 중간 자막 — 말하는 동안 계속 갱신된다
 { "status": 200, "msg": "success",
-  "data": { "type": "partial", "text": "경복궁까지", "feature": null } }
+  "data": { "type": "partial", "text": "경복궁까지", "feature": null, "translated": null } }
 
 // ② 확정 문장 — 침묵이 감지되면 확정된다
 { "status": 200, "msg": "success",
-  "data": { "type": "final", "text": "경복궁까지 가는 길 알려줘", "feature": null } }
+  "data": { "type": "final", "text": "경복궁까지 가는 길 알려줘", "feature": null, "translated": null } }
 
 // ③ 명령어 감지 — 확정 문장에서 기능이 잡혔을 때만 온다
 { "status": 200, "msg": "success",
-  "data": { "type": "wake", "text": "경복궁까지 가는 길 알려줘", "feature": "navigate" } }
+  "data": { "type": "wake", "text": "경복궁까지 가는 길 알려줘", "feature": "navigate", "translated": null } }
 
 // ④ 기능 실행 결과 — 서버가 지도 API까지 호출한 결과 (execute=true일 때)
 { "status": 200, "msg": "success",
   "data": { "feature": "navigate", "text": "경복궁까지 가는 길 알려줘",
-            "data": { "summary": {...}, "path": [...], "section": [...], "guide": [...] } } }
+            "data": { "origin": "...", "destination": "...", "summary": {...}, "path": [...] } } }
 ```
 
 `data.data`의 구조는 기능마다 다르다. `navigate`는 [지도 경로 응답](#post-mapdirections)과 같다.
 
-### 실패 메시지
-
-```jsonc
-// 서버에 CLOVA 키가 없음 -> 이 메시지를 보내고 소켓을 닫는다
-{ "status": 500, "msg": "CLOVA Speech 환경변수가 설정되지 않았습니다", "data": null }
-
-// 목적지를 알아듣지 못함 (인식 이벤트는 정상적으로 오고, 실행 결과만 실패)
-{ "status": 400, "msg": "목적지를 알아듣지 못했습니다: 길 알려줘", "data": null }
-
-// 목적지만 말했는데 현재 위치 좌표가 없음
-{ "status": 400, "msg": "출발지를 알 수 없습니다. 현재 위치 좌표를 함께 전달해주세요", "data": null }
-
-// 좌표에 해당하는 도로명 주소가 없음 (바다 위 등)
-{ "status": 404, "msg": "좌표에 해당하는 주소가 없습니다: 33.0,126.0", "data": null }
-
-// 아직 구현되지 않은 기능
-{ "status": 501, "msg": "아직 지원하지 않는 기능입니다: translate", "data": null }
-```
-
-### 처리 순서 예시
+#### 처리 순서 예시
 
 `lat=37.5666103&lng=126.9783882`(서울시청)로 연결하고 "경복궁까지 가는 길 알려줘"라고 말한 경우:
 
@@ -140,6 +155,81 @@ ws://localhost:8000/stt/ws?language=ko&lat=37.5666103&lng=126.9783882
 
 `{"action":"stop"}`을 보낸 뒤에도 실행 중인 기능 결과가 있으면 그것까지 보내고 소켓이 닫힌다(최대 10초 대기).
 
+#### 실패 메시지
+
+```jsonc
+// 서버에 CLOVA 키가 없음 -> 이 메시지를 보내고 소켓을 닫는다
+{ "status": 500, "msg": "CLOVA Speech 환경변수가 설정되지 않았습니다", "data": null }
+
+// 목적지를 알아듣지 못함 (인식 이벤트는 정상적으로 오고, 실행 결과만 실패)
+{ "status": 400, "msg": "목적지를 알아듣지 못했습니다: 길 알려줘", "data": null }
+
+// 목적지만 말했는데 현재 위치 좌표가 없음
+{ "status": 400, "msg": "출발지를 알 수 없습니다. 현재 위치 좌표를 함께 전달해주세요", "data": null }
+
+// 좌표에 해당하는 도로명 주소가 없음 (바다 위 등)
+{ "status": 404, "msg": "좌표에 해당하는 주소가 없습니다: 33.0,126.0", "data": null }
+
+// 키워드는 잡혔지만 핸들러가 없는 기능 (exchange / qa)
+{ "status": 501, "msg": "아직 지원하지 않는 기능입니다: qa", "data": null }
+```
+
+---
+
+### 1-2. dialog 모드 (외국인 대화 번역)
+
+상대(외국인)가 말하는 영어를 인식해 **원문과 한국어 번역을 함께** 내려준다.
+CLOVA Speech의 번역 옵션을 그대로 쓰므로 별도 API 호출이 없다.
+
+#### 진입
+
+command 모드의 **확정 문장(`final`)** 에 아래 단어가 하나라도 들어가면 자동 전환된다 (공백은 무시하고 비교).
+
+```
+번역 · 통역 · 외국인 · 외국어
+```
+
+예: "번역해줘", "통역 켜줘", "외국인이랑 대화 번역해줘" — 전부 dialog 진입.
+
+> 이 판정이 명령어 감지보다 **먼저** 실행된다. 번역/통역은 `wake` 이벤트로 나가지 않으므로
+> 클라이언트는 `feature: "translate"`를 받을 일이 없다. 실시간 번역 UI는 `status` 이벤트로만 켠다.
+
+#### 종료
+
+dialog 모드의 확정 문장에 `stop` 또는 `exit`가 포함되면 command 모드로 돌아온다(대소문자 무시).
+소켓은 끊지 않는다.
+
+#### 메시지 예시
+
+```jsonc
+// ① 모드 진입 알림
+{ "status": 200, "msg": "success",
+  "data": { "type": "status", "text": "dialog", "feature": null, "translated": null } }
+
+// ② 상대가 말하는 동안 (원문 + 번역이 같이 갱신된다)
+{ "status": 200, "msg": "success",
+  "data": { "type": "partial", "text": "Where is the", "feature": null,
+            "translated": "어디에 있나요" } }
+
+// ③ 확정 문장
+{ "status": 200, "msg": "success",
+  "data": { "type": "final", "text": "Where is the subway station?", "feature": null,
+            "translated": "지하철역이 어디에 있나요?" } }
+
+// ④ 모드 복귀 알림 ("stop" 이라고 말했을 때)
+{ "status": 200, "msg": "success",
+  "data": { "type": "status", "text": "command", "feature": null, "translated": null } }
+```
+
+#### 주의
+
+- dialog 모드에서는 **`wake` 이벤트도, 기능 실행 결과도 오지 않는다.** 자막(`partial`/`final`)만 온다.
+- 인식 언어는 `en`, 번역 대상은 `ko`로 **서버에 고정**되어 있다. 쿼리 `language`는 command 모드에만 적용된다.
+- 모드 전환 시 기존 STT 세션을 닫고 새로 여는 구조라, 전환 직후 잠깐은 인식 이벤트가 오지 않는다. 이때 들어온 오디오는 버려진다.
+- `translated`는 dialog 모드에서만 채워진다. command 모드에서는 항상 `null`.
+
+---
+
 ### 클라이언트 예제 (브라우저)
 
 ```js
@@ -150,15 +240,25 @@ const { latitude: lat, longitude: lng } = pos.coords;
 const ws = new WebSocket(`ws://localhost:8000/stt/ws?language=ko&lat=${lat}&lng=${lng}`);
 ws.binaryType = "arraybuffer";
 
+let mode = "command";
+
 ws.onmessage = (ev) => {
   const res = JSON.parse(ev.data);
   if (res.status !== 200) return showError(res.msg);
 
   const d = res.data;
-  if (d.type === "partial")      showSubtitle(d.text);        // 중간 자막
-  else if (d.type === "final")   fixSubtitle(d.text);         // 확정 자막
-  else if (d.type === "wake")    showFeatureBadge(d.feature); // 기능 호출 표시
-  else                           renderResult(d.feature, d.data); // 기능 실행 결과
+  if (d.type === "status") {                    // 모드 전환 (dialog | command)
+    mode = d.text;
+    toggleTranslateOverlay(mode === "dialog");
+  } else if (d.type === "partial" || d.type === "final") {
+    const fixed = d.type === "final";
+    if (mode === "dialog") showDialogSubtitle(d.text, d.translated, fixed); // 원문 + 번역
+    else                   showSubtitle(d.text, fixed);
+  } else if (d.type === "wake") {
+    showFeatureBadge(d.feature);                // 기능 호출 표시
+  } else {
+    renderResult(d.feature, d.data);            // 기능 실행 결과
+  }
 };
 
 // 마이크 -> 16kHz PCM 전송
@@ -300,7 +400,68 @@ reverse_geocode(Coordinate(lat=37.5666103, lng=126.9783882))
 
 ---
 
-## 3. 기타
+## 3. 이미지 번역 REST
+
+### POST `/imgPapago/image`
+
+이미지 속 글자를 인식해 **번역문을 얹어 다시 그린 이미지**를 돌려준다 (파파고 이미지 번역).
+메뉴판·표지판을 카메라로 잡아 그대로 번역해 보여주는 용도다.
+
+```jsonc
+// 요청 — image는 base64. 브라우저 canvas.toDataURL()의 data URL을 그대로 넣어도 된다
+{
+  "image": "data:image/png;base64,iVBORw0KGgo...",
+  "source": "auto",   // 생략 가능 (기본 auto — 파파고가 원본 언어를 판별)
+  "target": "ko"      // 생략 가능 (기본 ko)
+}
+```
+
+```jsonc
+// 응답
+{ "status": 200, "msg": "success",
+  "data": {
+    "rendered_image": "iVBORw0KGgo...",       // 번역문이 얹힌 결과 이미지 (base64, 접두사 없음)
+    "source_text": "ラーメン 800円",             // 인식된 원문
+    "target_text": "라멘 800엔"                 // 번역문
+  } }
+```
+
+`rendered_image`에는 `data:` 접두사가 없다. 그대로 그리려면 클라이언트가 붙여야 한다.
+
+```js
+const res = await fetch(`${BASE}/imgPapago/image`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ image: canvas.toDataURL('image/png') }),
+})
+const body = await res.json()
+if (body.status !== 200) return showError(body.msg)
+img.src = `data:image/png;base64,${body.data.rendered_image}`
+```
+
+| status | 언제 |
+|---|---|
+| 400 | `image`가 비었거나 base64로 해석되지 않음 |
+| 404 | 이미지에서 글자를 찾지 못함 |
+| 500 | `IMG_TRANSLATE_URL` / `PAPAGO_CLIENT_ID` / `PAPAGO_SECRET_KEY` 미설정 |
+| 502 | 파파고 호출 실패 또는 응답 형식이 예상과 다름 |
+
+#### 파파고 쪽 제약 (그대로 전달되므로 클라이언트가 지켜야 한다)
+
+- 형식: JPG · JPEG · PNG · TIFF
+- 크기: 이미지당 **20MB 이내**, **1960×1960px 이내**
+- `source`는 `auto` · `ko` · `en` · `ja` · `zh-CN` · `zh-TW` · `vi` · `th` · `id` · `fr` · `es` · `ru`,
+  `target`은 여기에 `de` · `it`가 추가된다
+- 이미지를 JSON 본문에 base64로 싣기 때문에 전송량은 원본보다 약 33% 커진다. 웹캠 프레임 정도는
+  문제없지만, 고해상도 사진은 캡처 단계에서 줄여 보내는 편이 좋다
+
+서버는 `IMG_TRANSLATE_URL`(기본값 `https://papago.apigw.ntruss.com/image-to-image/v1/translate`)로
+multipart 요청을 보낸다. 이 엔드포인트는 번역문을 **원본 이미지에 합성해서** 돌려주는 쪽이다
+(텍스트만 필요하면 파파고에 `image-to-text`가 따로 있다).
+
+---
+
+## 4. 기타
 
 ### GET `/health`
 
@@ -327,13 +488,17 @@ WebSocket의 `wake` 이벤트에서 오는 `feature` 값이다.
 | feature | 트리거 키워드 | 상태 |
 |---|---|---|
 | `navigate` | 안내, 경로, 까지, 가는 길, 어떻게 가, 길 알려 | **동작** — 지도 경로 반환 |
-| `translate` | 번역, 통역 | 미구현 (`501`) |
 | `exchange` | 환율, 환전, 얼마, 가격, 원으로 | 미구현 (`501`) |
 | `qa` | 알려줘, 뭐야, 궁금, 찾아, 설명, 질문 | 미구현 (`501`) |
 
-키워드는 [`modules/stt/keyword_spotter.py`](modules/stt/keyword_spotter.py), 기능 실행은 [`service.py`](service.py)에서 관리한다.
+번역/통역은 `feature`가 아니라 **모드 전환**이다. 키워드 목록에 없고 `wake`로도 오지 않으며,
+[dialog 모드](#1-2-dialog-모드-외국인-대화-번역)의 `status` 이벤트로 처리한다.
+
+문장 판정(기능 키워드 + dialog 진입/종료어)은 전부 [`modules/stt/keyword_spotter.py`](modules/stt/keyword_spotter.py) 한 곳에 있고,
+기능 실행은 [`service.py`](service.py)에서 관리한다.
 
 ### 아직 없는 것
 
-- **상대 대화 인식(장문 STT)** — 인식 함수는 [`modules/stt/long_stt.py`](modules/stt/long_stt.py)에 있으나 엔드포인트로 연결되지 않았다.
-- **이미지 인식 / 번역** — 모듈 미구현.
+- **환율(`exchange`) / 질문 응답(`qa`)** — 키워드만 등록되어 있고 핸들러가 없다.
+- **음성으로 이미지 번역 호출** — `/imgPapago/image`는 REST로만 열려 있다. 음성 명령과는 연결되지 않아
+  클라이언트가 버튼으로 캡처해서 직접 호출해야 한다.

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class CommandData(BaseModel):
     text: str  # 인식된 문장
-    feature: Optional[str] = None  # 감지된 기능 (translate | navigate | exchange | qa), 없으면 None
+    feature: Optional[str] = None  # 감지된 기능 (navigate | exchange | qa), 없으면 None
 
 
 class CommandEvent(BaseModel):
