@@ -70,7 +70,7 @@ def search_place(query: str) -> BaseResponse[SearchResult]:
 
 ## 작성 예시
 
-`schemas/example.py`, `modules/example/`, `modules/map/` 참고.
+`schemas/map.py`, `modules/map/` 참고.
 
 ```python
 # schemas/map.py (팀원 작성)

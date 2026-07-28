@@ -2,3 +2,8 @@ fastapi
 uvicorn[standard]
 python-dotenv
 requests  # map
+grpcio  # stt
+grpcio-tools  # stt
+numpy  # stt
+sounddevice  # stt
+python-multipart  # stt

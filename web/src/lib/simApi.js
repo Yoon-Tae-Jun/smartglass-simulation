@@ -6,9 +6,15 @@
 // 질문응답(qa)은 서버 미구현이라 여기서 제공하지 않는다(오버레이가 '준비 중' 표시).
 // ─────────────────────────────────────────────────────────────
 
-// 백엔드 주소 (env 없으면 로컬 기본값). WS는 http→ws 로 파생.
+// 백엔드 주소. VITE_API_BASE가
+//   - 없으면: 로컬 기본값(http://localhost:8000)으로 직접 붙는다
+//   - 빈 값이면(VITE_API_BASE=): 빈 문자열이 되어 같은 origin으로 붙는다
+//     → vite.config.js의 프록시가 백엔드로 넘긴다 (LB 뒤 배포용)
+// WS는 http→ws 로 파생하고, same-origin일 때는 현재 페이지 주소에서 만든다.
 const HTTP_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
-const WS_BASE = HTTP_BASE.replace(/^http/, 'ws')
+const WS_BASE = HTTP_BASE
+  ? HTTP_BASE.replace(/^http/, 'ws')
+  : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
 // ── 길찾기 (F-MAP) ────────────────────────────────────────────
 // POST /map/directions — req: { origin(도로명주소), destination(상호명/주소) }
