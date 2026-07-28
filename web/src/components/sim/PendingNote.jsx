@@ -1,4 +1,4 @@
-// 서버 미구현 기능(번역·질문응답·이미지)의 '준비 중' 안내.
+// 서버 미구현 기능(질문응답)의 '준비 중' 안내.
 export default function PendingNote({ className = '' }) {
   return (
     <p className={`text-sm text-white/55 ${className}`}>

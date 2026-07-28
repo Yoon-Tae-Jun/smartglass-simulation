@@ -1,8 +1,9 @@
 // ─────────────────────────────────────────────────────────────
 // 시뮬레이션 API 경계
 // 서버와 동일한 공통 응답 포맷 { status, msg, data }(BaseResponse)를 다룬다.
-// 실연동: 길찾기(POST /map/directions), 음성 명령(WS /stt/ws).
-// 번역·질문응답·이미지 번역은 서버 미구현이라 여기서 제공하지 않는다(오버레이가 '준비 중' 표시).
+// 실연동: 길찾기(POST /map/directions), 이미지 번역(POST /imgPapago/image),
+//        음성 명령(WS /stt/ws).
+// 질문응답(qa)은 서버 미구현이라 여기서 제공하지 않는다(오버레이가 '준비 중' 표시).
 // ─────────────────────────────────────────────────────────────
 
 // 백엔드 주소 (env 없으면 로컬 기본값). WS는 http→ws 로 파생.
@@ -22,6 +23,25 @@ export async function getDirections({ origin, destination }) {
     return await res.json()
   } catch (e) {
     // 네트워크/파싱 실패는 공통 포맷으로 감싸 오버레이가 msg를 표시하게 한다
+    return { status: 502, msg: `서버에 연결할 수 없습니다: ${e?.message ?? e}`, data: null }
+  }
+}
+
+// ── 이미지 번역 (F-IMG) ───────────────────────────────────────
+// POST /imgPapago/image — req: { image, source, target }
+//   image: base64. canvas.toDataURL()의 data URL을 그대로 넣어도 된다
+//   source: 'auto'면 파파고가 원본 언어를 판별 / target: 번역할 언어
+// 응답 data: { rendered_image(base64, 'data:' 접두사 없음), source_text, target_text }
+// 파파고 제약: JPG·PNG 등 20MB·1960×1960px 이내 (웹캠 프레임은 여유 있음)
+export async function translateImage({ image, source = 'auto', target = 'ko' }) {
+  try {
+    const res = await fetch(`${HTTP_BASE}/imgPapago/image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image, source, target }),
+    })
+    return await res.json()
+  } catch (e) {
     return { status: 502, msg: `서버에 연결할 수 없습니다: ${e?.message ?? e}`, data: null }
   }
 }
@@ -48,8 +68,9 @@ function normalizeStt(res) {
     return { kind: 'error', status: res?.status ?? 0, msg: res?.msg ?? '알 수 없는 오류' }
   }
   const d = res.data ?? {}
-  // type 있으면 인식 이벤트(partial|final|wake|status). status는 command↔dialog 모드 전환,
+  // type 있으면 인식 이벤트(partial|final|wake|status|capture). status는 command↔dialog 모드 전환,
   // dialog 모드의 partial|final은 translated(번역문)를 함께 싣는다.
+  // capture는 "지금 화면을 찍어 보내라"는 요청 — 3초 안에 sendFrame()으로 답해야 한다.
   if (d.type) {
     return { kind: d.type, feature: d.feature ?? null, text: d.text, translated: d.translated ?? null }
   }
@@ -120,6 +141,17 @@ export function startVoiceCommand({ location, language = 'ko', mode, execute = t
   }
 
   return {
+    // capture 이벤트에 대한 응답 — 방금 찍은 화면을 서버로 보낸다(data URL 그대로 OK).
+    // 서버는 3초만 기다리므로 capture를 받은 즉시 호출해야 한다.
+    sendFrame(image) {
+      if (ws.readyState !== 1) return false
+      try {
+        ws.send(JSON.stringify({ action: 'frame', image }))
+        return true
+      } catch {
+        return false
+      }
+    },
     stop() {
       if (ws.readyState === 1) {
         try { ws.send(JSON.stringify({ action: 'stop' })) } catch { /* noop */ }

@@ -7,7 +7,7 @@ import TranslateOverlay from '../components/sim/overlays/TranslateOverlay.jsx'
 import ImageTranslateOverlay from '../components/sim/overlays/ImageTranslateOverlay.jsx'
 import MapOverlay from '../components/sim/overlays/MapOverlay.jsx'
 import QaOverlay from '../components/sim/overlays/QaOverlay.jsx'
-import { getCurrentLocation, startVoiceCommand } from '../lib/simApi.js'
+import { getCurrentLocation, startVoiceCommand, translateImage } from '../lib/simApi.js'
 
 const FEATURE_LABEL = {
   translate: '실시간 음성 번역',
@@ -17,7 +17,10 @@ const FEATURE_LABEL = {
 }
 
 // 서버가 감지한 기능 이름 → 프론트 오버레이 key
-const FEATURE_KEY = { navigate: 'map', translate: 'translate', qa: 'qa' }
+const FEATURE_KEY = { navigate: 'map', translate: 'translate', qa: 'qa', image: 'image' }
+
+// 설정의 언어 이름 → 파파고 언어 코드 (이미지 번역 target)
+const LANG_CODE = { 한국어: 'ko', 영어: 'en', 일본어: 'ja', 중국어: 'zh-CN' }
 
 // 버튼을 누르면 음성인식을 자동으로 켜는 기능들 (이미지 번역은 음성 없음)
 const VOICE_FEATURES = new Set(['translate', 'map', 'qa'])
@@ -36,6 +39,9 @@ export default function Simulation() {
   // 한 번에 주 기능 1개만 활성 (FR-SYS-3)
   const [activeFeature, setActiveFeature] = useState(null)
   const [frameDataUrl, setFrameDataUrl] = useState(null) // 이미지 번역용 freeze 프레임
+  const [imageResult, setImageResult] = useState(null) // { rendered_image, source_text, target_text }
+  const [imagePending, setImagePending] = useState(false) // 번역 요청 진행 중
+  const [imageError, setImageError] = useState(null) // 이미지 번역 실패 msg
   const [settings, setSettings] = useState({
     region: '서울',
     sourceLang: '일본어', // 상대 언어
@@ -60,6 +66,13 @@ export default function Simulation() {
   const dialogRef = useRef(false) // 콜백 클로저에서 최신 dialog 모드 여부를 참조
   const voiceFeatureRef = useRef(null) // 음성 세션이 묶인 기능(null=헤더 마이크, 서버 자유 라우팅)
   const sessionId = useRef(0) // 위치 조회를 기다리는 사이 취소됐는지 판별
+  const imageSession = useRef(0) // 번역 응답이 도착했을 때 아직 유효한 요청인지 판별
+  const imagePendingRef = useRef(false) // 콜백 클로저에서 최신 진행 여부를 참조
+  const settingsRef = useRef(settings) // 음성 콜백 클로저에서 최신 설정을 참조
+
+  useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
 
   // 설정 팝오버: ESC로 닫기
   useEffect(() => {
@@ -83,11 +96,15 @@ export default function Simulation() {
     const next = activeFeature === key ? null : key
     setActiveFeature(next)
 
-    // 이미지 번역 진입 시 현재 프레임을 캡처해 고정
+    // 이미지 번역 진입 시 현재 프레임을 캡처해 고정하고 곧바로 번역을 요청한다
     if (next === 'image') {
-      setFrameDataUrl(webcamRef.current?.capture() ?? null)
+      captureAndTranslate()
     } else {
+      imageSession.current += 1 // 진행 중이던 번역 응답 무시
       setFrameDataUrl(null)
+      setImageResult(null)
+      markImagePending(false)
+      setImageError(null)
     }
 
     // 인식 기능이면 그 기능에 고정된 음성 세션 시작, 아니면(이미지/off) 진행 중이던 인식 정지.
@@ -97,6 +114,37 @@ export default function Simulation() {
     } else {
       stopVoice()
     }
+  }
+
+  // 번역 진행 여부는 음성 콜백(클로저)에서도 읽어야 해서 ref와 상태를 함께 갱신한다
+  function markImagePending(value) {
+    imagePendingRef.current = value
+    setImagePending(value)
+  }
+
+  // 지금 웹캠 화면을 찍어 REST(POST /imgPapago/image)로 번역한다 (버튼 진입·다시 촬영).
+  // 음성 명령으로 들어온 이미지 번역은 서버가 대신 파파고를 호출하므로 이 경로를 타지 않는다.
+  async function captureAndTranslate() {
+    const frame = webcamRef.current?.capture() ?? null
+    const session = (imageSession.current += 1)
+
+    setFrameDataUrl(frame)
+    setImageResult(null)
+    setImageError(null)
+    if (!frame) {
+      markImagePending(false)
+      setImageError('카메라 화면을 캡처하지 못했습니다. 카메라 권한을 확인해 주세요')
+      return
+    }
+    markImagePending(true)
+
+    const target = LANG_CODE[settingsRef.current.targetLang] ?? 'ko'
+    const res = await translateImage({ image: frame, target })
+    if (session !== imageSession.current) return // 그사이 기능을 끄거나 다시 찍음
+
+    markImagePending(false)
+    if (res.status === 200 && res.data) setImageResult(res.data)
+    else setImageError(res.msg) // 400 글자 없음 / 500 키 미설정 / 502 파파고 실패
   }
 
   // 마지막 명령을 상태와 ref에 함께 기록 (ref는 error 이벤트 분기용)
@@ -133,6 +181,24 @@ export default function Simulation() {
         setDialogActive(false)
         setDialogLine(null)
       }
+    } else if (evt.kind === 'capture') {
+      // 서버가 "지금 이 순간의 화면"을 요청했다 (이미지 번역). 3초 안에 답해야 한다.
+      const frame = webcamRef.current?.capture() ?? null
+      // 다른 기능에 고정된 세션이면 화면만 답해주고 이미지 UI는 건드리지 않는다
+      if (lock && lock !== 'image') {
+        voiceCtrl.current?.sendFrame(frame ?? '')
+        return
+      }
+      imageSession.current += 1 // REST 경로의 응답이 끼어들지 않게 무효화
+      setFrameDataUrl(frame) // 서버로 보낸 그 화면을 정지 화면으로 고정
+      setImageResult(null)
+      if (frame && voiceCtrl.current?.sendFrame(frame)) {
+        setImageError(null)
+        markImagePending(true)
+      } else {
+        markImagePending(false)
+        setImageError('카메라 화면을 캡처하지 못했습니다. 카메라 권한을 확인해 주세요')
+      }
     } else if (evt.kind === 'wake') {
       // 고정 세션에서 다른 기능이 감지되면 무시한다
       if (lock && FEATURE_KEY[evt.feature] !== lock) return
@@ -140,6 +206,11 @@ export default function Simulation() {
       rememberCommand(evt)
       setCommandError(null)
       setVoiceDirections(null)
+      if (evt.feature === 'image') {
+        setImageResult(null)
+        setImageError(null)
+        markImagePending(true) // capture 요청이 곧 뒤따른다
+      }
       const key = FEATURE_KEY[evt.feature]
       if (key) setActiveFeature(key) // 음성으로 기능 호출
     } else if (evt.kind === 'result') {
@@ -150,12 +221,23 @@ export default function Simulation() {
       if (evt.feature === 'navigate' && evt.data) {
         setVoiceDirections(evt.data) // 서버가 조회한 경로 그대로 렌더
         setActiveFeature('map')
+      } else if (evt.feature === 'image' && evt.data) {
+        // 서버가 파파고까지 호출한 결과 — REST 응답과 같은 형식이라 그대로 렌더
+        markImagePending(false)
+        setImageError(null)
+        setImageResult(evt.data)
+        setActiveFeature('image')
       }
     } else if (evt.kind === 'error') {
       // 연결·마이크 문제(0/403)는 자막에, 그 외는 실행 중인 기능의 실패로 본다
       const connectionIssue = evt.status === 0 || evt.status === 403
       if (connectionIssue || !commandRef.current) setVoiceCaption({ error: evt.msg })
       else setCommandError(evt.msg)
+      // 이미지 번역을 기다리던 중이면 그 실패로 본다 (서버는 실패 msg만 보낸다)
+      if (imagePendingRef.current) {
+        markImagePending(false)
+        if (!connectionIssue) setImageError(evt.msg)
+      }
     }
   }
 
@@ -341,7 +423,15 @@ export default function Simulation() {
                 line={dialogLine}
               />
             )}
-            {activeFeature === 'image' && <ImageTranslateOverlay frameDataUrl={frameDataUrl} />}
+            {activeFeature === 'image' && (
+              <ImageTranslateOverlay
+                frameDataUrl={frameDataUrl}
+                result={imageResult}
+                pending={imagePending}
+                error={imageError ?? activeError}
+                onRetry={captureAndTranslate}
+              />
+            )}
             {activeFeature === 'map' && (
               <MapOverlay directions={voiceDirections} request={commandText} error={activeError} />
             )}

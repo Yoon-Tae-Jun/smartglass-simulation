@@ -113,7 +113,7 @@ web/
 | 목적지/경로·시간 정보 | `server` (map) | 윤태준 | `POST /map/directions` (+`/search`,`/geocode`) | REST |
 | 목적지 추출 | `server` (llm) | 박찬영 | `POST /llm/extract-destination` | REST |
 | 질문응답 | `server` (llm/rag) | 박찬영 | `POST /llm/ask` | REST |
-| 이미지 번역 | `server` (papago) | 미정 | `POST /papago/image` | REST |
+| 이미지 번역 | `server` (papago) | 윤태준 | `POST /imgPapago/image` (음성 명령은 `WS /stt/ws`의 `capture`⇄`frame`) | REST |
 | 핸드폰 알림 | `server` | 윤태준 | `WS /notification/stream` (조사 중) | 미정 |
 
 > 모든 REST 응답은 공통 포맷 `{ status, msg, data }`를 따릅니다.
