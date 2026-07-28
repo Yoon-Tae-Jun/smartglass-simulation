@@ -186,6 +186,16 @@ export default function Simulation() {
     else setImageError(res.msg) // 400 글자 없음 / 500 키 미설정 / 502 파파고 실패
   }
 
+  // 이미지 번역 결과 PiP 닫기 — 기능은 켜둔 채(라이브 캠 유지) 결과만 비운다.
+  // 진행 중이거나 뒤늦게 오는 번역 응답이 닫힌 UI를 되살리지 않도록 세션을 올린다.
+  function closeImageResult() {
+    imageSession.current += 1
+    setFrameDataUrl(null)
+    setImageResult(null)
+    markImagePending(false)
+    setImageError(null)
+  }
+
   // 마지막 명령을 상태와 ref에 함께 기록 (ref는 error 이벤트 분기용)
   function rememberCommand(evt) {
     const next = { text: evt.text, feature: evt.feature }
@@ -422,6 +432,7 @@ export default function Simulation() {
                 pending={imagePending}
                 error={imageError ?? activeError}
                 onRetry={captureAndTranslate}
+                onClose={closeImageResult}
               />
             )}
             {activeFeature === 'map' && (
