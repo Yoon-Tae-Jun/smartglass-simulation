@@ -4,7 +4,7 @@
 // 부모(Simulation)가 activeFeature로 소유하며 여기서는 표시/전달만 한다.
 // props:
 //   side      'left' | 'right'  — 좌/우 대칭 스타일
-//   features  [{ key, label, icon }]  — 이 다리에 올릴 기능들
+//   features  [{ key, label, icon }]  — 이 다리에 올릴 기능들 (icon은 lucide-react 컴포넌트)
 //   active    현재 활성 기능 key (없으면 null)
 //   listening 음성인식 진행 중 여부 — 활성 버튼에 인식 표시를 띄운다
 //   onToggle  (key) => void
@@ -39,7 +39,7 @@ export default function TempleRail({ side, features, active, listening, onToggle
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-bright" />
               </span>
             )}
-            <span className="text-xl leading-none">{f.icon}</span>
+            <f.icon className="h-6 w-6" strokeWidth={1.75} aria-hidden="true" />
             <span
               className={`text-[10px] font-medium leading-tight ${on ? 'text-sky-bright' : 'text-white/70'}`}
             >

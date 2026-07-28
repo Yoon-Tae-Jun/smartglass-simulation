@@ -2,6 +2,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
+import { Settings, X } from 'lucide-react'
 import PointCloudHead from '../components/PointCloudHead.jsx'
 import Starfield from '../components/Starfield.jsx'
 import GlassesTuner from '../components/GlassesTuner.jsx'
@@ -72,9 +73,17 @@ export default function Home() {
         <button
           type="button"
           onClick={() => setShowTuner((v) => !v)}
-          className="hero-ui absolute right-4 top-4 z-40 rounded-lg border border-sky/30 bg-navy-deep/85 px-3 py-1.5 font-mono text-[11px] text-white/70 backdrop-blur transition-colors hover:border-sky hover:text-sky"
+          className="hero-ui absolute right-4 top-4 z-40 flex items-center gap-1.5 rounded-lg border border-sky/30 bg-navy-deep/85 px-3 py-1.5 font-mono text-[11px] text-white/70 backdrop-blur transition-colors hover:border-sky hover:text-sky"
         >
-          {showTuner ? '튜너 닫기 ✕' : '튜너 열기 ⚙'}
+          {showTuner ? (
+            <>
+              <X className="h-3.5 w-3.5" strokeWidth={2} /> 튜너 닫기
+            </>
+          ) : (
+            <>
+              <Settings className="h-3.5 w-3.5" strokeWidth={1.75} /> 튜너 열기
+            </>
+          )}
         </button>
       )}
       {showTuner && !playing && (
