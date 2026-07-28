@@ -25,8 +25,12 @@ FRAME_TIMEOUT = 3.0  # capture 요청 후 카메라 프레임을 기다리는 �
 
 입력:
 - 바이너리 프레임 = 16kHz·모노·16bit PCM 청크
-- 텍스트 프레임 = {"action": "stop"} 종료 요청,
-  {"action": "frame", "image": "<base64>"} capture 요청에 대한 응답
+- 텍스트 프레임
+  - {"action": "stop"} 종료 요청
+  - {"action": "frame", "image": "<base64>"} capture 요청에 대한 응답
+  - {"action": "wake"} 호출어를 건너뛰고 바로 명령 수신 상태로 (기능 버튼 클릭 등)
+    {"action": "wake", "mode": "dialog"} 이면 대화 번역 모드로 바로 진입
+  - {"action": "sleep"} 호출어 대기 상태로 복귀
 쿼리:
 - language: 인식 언어 (ko | en | ja)
 - lat, lng: 현재 위치 좌표. 목적지만 말했을 때 길찾기 출발지로 사용된다
@@ -37,6 +41,7 @@ FRAME_TIMEOUT = 3.0  # capture 요청 후 카메라 프레임을 기다리는 �
 
 출력: 모두 BaseResponse JSON
 - data.type이 있으면 인식 이벤트 (partial | final | wake | status | capture)
+- data.mode에 현재 세션 상태 (idle | listening | dialog)
 - data.feature가 있으면 기능 실행 결과 (CommandResult)
 - capture는 "지금 화면을 찍어 보내달라"는 요청이다. 클라이언트는 곧바로
   {"action": "frame", "image": ...}로 답해야 이미지 번역이 진행된다
@@ -126,8 +131,14 @@ async def stream(
                 action = payload.get("action")
                 if action == "stop":
                     break
+                # 화면 조작(기능 버튼)으로 호출어를 건너뛰고 명령 수신 상태로
+                if action == "wake":
+                    session.wake(payload.get("mode"))
+                # 기능을 끈 경우 즉시 호출어 대기 상태로 되돌린다
+                elif action == "sleep":
+                    session.sleep()
                 # capture 요청에 대한 응답(또는 클라이언트가 미리 보낸 프레임)
-                if action == "frame":
+                elif action == "frame":
                     frame["image"] = payload.get("image")
                     frame_arrived.set()
     except WebSocketDisconnect:

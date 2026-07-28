@@ -136,6 +136,47 @@ class CommandSession:
     def mode(self) -> str:
         return self._mode
 
+    """
+    호출어 없이 곧바로 명령 수신 상태로 넘기는 함수
+
+    화면에서 기능 버튼을 누른 경우처럼 "이미 부른 것과 같다"고 볼 수 있을 때 쓴다.
+    소켓을 새로 열지 않고 현재 세션의 상태만 바꾸므로 인식이 끊기지 않는다.
+
+    PARAMS:
+    - mode: 들어갈 상태. "dialog"면 대화 번역 모드, 그 외에는 명령 수신 상태
+    """
+    def wake(self, mode: Optional[str] = None) -> None:
+        # 대화 번역은 영어 인식 + 한국어 번역이라 세션을 다시 열어야 한다
+        if mode == MODE_DIALOG:
+            self._emit(
+                CommandEvent(
+                    type="status",
+                    text="대화 번역 모드로 전환합니다. 영어로 말씀해 주세요",
+                    mode=MODE_DIALOG,
+                )
+            )
+            self._open(MODE_DIALOG, "en", "ko")
+            return
+
+        with self._lock:
+            previous = self._mode
+            session = self._session
+            self._mode = MODE_LISTENING
+            self._last_activity = time.monotonic()
+
+        self._emit(CommandEvent(type="status", text="네, 듣고 있어요", mode=MODE_LISTENING))
+
+        # dialog에서 돌아오는 경우에만 언어 설정이 달라 재접속이 필요하다
+        if previous == MODE_DIALOG:
+            self._open(MODE_LISTENING, self.language, None)
+        elif session is not None:
+            # 호출어를 기다리는 동안 들린 말이 명령으로 확정되지 않게 버퍼를 비운다
+            session.reset_buffer("")
+
+    """호출어 대기 상태로 되돌리는 함수 (기능을 끄는 등 화면 조작으로 호출)"""
+    def sleep(self) -> None:
+        self._sleep("대기 상태로 돌아갑니다. 호출어를 불러 주세요")
+
     # 현재 상태에 맞는 STT 스트리밍 세션을 새로 연다 (언어·번역 설정이 바뀔 때 재접속)
     def _open(self, mode: str, language: str, translate_to: Optional[str]) -> None:
         with self._lock:
