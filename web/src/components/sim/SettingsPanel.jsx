@@ -10,7 +10,13 @@ const FEATURE_META = {
   null: '왼쪽에서 기능을 선택해 시작하세요.',
 }
 
-const LANGS = ['일본어', '영어', '중국어', '한국어']
+// 현재는 영어↔한국어만 지원. 나머지 언어는 개발 중(선택 불가).
+const LANGS = [
+  { name: '영어', ready: true },
+  { name: '한국어', ready: true },
+  { name: '일본어', ready: false },
+  { name: '중국어', ready: false },
+]
 
 // 현재는 서울만 지원. 나머지 도시는 확장 예정(선택 불가).
 const REGIONS = [
@@ -111,7 +117,10 @@ export default function SettingsPanel({
               aria-label="상대 언어"
             >
               {LANGS.map((l) => (
-                <option key={l}>{l}</option>
+                <option key={l.name} value={l.name} disabled={!l.ready}>
+                  {l.name}
+                  {l.ready ? '' : ' (개발 중)'}
+                </option>
               ))}
             </select>
             <button
@@ -131,7 +140,10 @@ export default function SettingsPanel({
               aria-label="내 언어"
             >
               {LANGS.map((l) => (
-                <option key={l}>{l}</option>
+                <option key={l.name} value={l.name} disabled={!l.ready}>
+                  {l.name}
+                  {l.ready ? '' : ' (개발 중)'}
+                </option>
               ))}
             </select>
           </div>

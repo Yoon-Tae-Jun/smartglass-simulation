@@ -66,6 +66,71 @@ export function getCurrentLocation({ timeout = 8000 } = {}) {
   })
 }
 
+// ── 권한 요청/조회 (진입 전 게이트용) ─────────────────────────
+// 반환값: 'granted' | 'denied' | 'blocked'
+//  - denied: 이번에 거부(다시 시도 가능) / blocked: 브라우저가 영구 차단(설정에서 풀어야 함)
+// permissions.query는 Safari 등에서 카메라·마이크 미지원일 수 있어 best-effort로만 쓴다.
+async function queryPermissionState(name) {
+  if (!navigator.permissions?.query) return null
+  try {
+    const status = await navigator.permissions.query({ name })
+    return status.state // 'granted' | 'prompt' | 'denied'
+  } catch {
+    return null
+  }
+}
+
+async function requestMediaPermission(constraints, permissionName) {
+  if (!navigator.mediaDevices?.getUserMedia) return 'blocked'
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints)
+    // 권한 확보만이 목적 → 스트림은 즉시 닫는다(실제 스트림은 이후 다시 연다)
+    stream.getTracks().forEach((t) => t.stop())
+    return 'granted'
+  } catch {
+    const state = await queryPermissionState(permissionName)
+    return state === 'denied' ? 'blocked' : 'denied'
+  }
+}
+
+export function requestCameraPermission() {
+  return requestMediaPermission({ video: true }, 'camera')
+}
+
+export function requestMicPermission() {
+  return requestMediaPermission({ audio: true }, 'microphone')
+}
+
+export function requestLocationPermission() {
+  if (!navigator.geolocation) return Promise.resolve('blocked')
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      () => resolve('granted'),
+      async (err) => {
+        // 영구 차단만 blocked, 타임아웃·위치불가는 denied로 재시도 유도
+        if (err.code === err.PERMISSION_DENIED) {
+          const state = await queryPermissionState('geolocation')
+          resolve(state === 'denied' ? 'blocked' : 'denied')
+        } else {
+          resolve('denied')
+        }
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 },
+    )
+  })
+}
+
+// 마운트 시 이미 허용된 항목을 선표시하기 위한 조회. 'granted'만 신뢰, 나머지는 'idle'.
+export async function queryInitialPermissions() {
+  const [cam, mic, geo] = await Promise.all([
+    queryPermissionState('camera'),
+    queryPermissionState('microphone'),
+    queryPermissionState('geolocation'),
+  ])
+  const norm = (s) => (s === 'granted' ? 'granted' : 'idle')
+  return { camera: norm(cam), mic: norm(mic), location: norm(geo) }
+}
+
 // ── 음성 명령 (WS /stt/ws, 실연동) ─────────────────────────────
 // 서버 BaseResponse → 프론트 이벤트로 정규화.
 // data.type 있으면 인식 이벤트(partial|final|wake), 없으면 기능 실행 결과.
