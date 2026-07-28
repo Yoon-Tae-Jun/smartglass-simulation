@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic
+requests
+langchain-huggingface
+sentence-transformers
+langchain-postgres
+psycopg2-binary
+pgvector
