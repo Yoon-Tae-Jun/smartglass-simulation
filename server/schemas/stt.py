@@ -5,11 +5,12 @@ from pydantic import BaseModel
 
 class CommandData(BaseModel):
     text: str  # 인식된 문장
-    feature: Optional[str] = None  # 감지된 기능 (navigate | exchange | qa), 없으면 None
+    feature: Optional[str] = None  # 감지된 기능 (translate | navigate | exchange | qa), 없으면 None
 
 
 class CommandEvent(BaseModel):
-    type: str  # partial(중간 자막) | final(확정 문장) | wake(명령어 감지)
+    type: str  # partial(중간 자막) | final(확정 문장) | wake(명령어 감지) | status(상태 변경)
     text: str  # 현재까지 인식된 문장
     feature: Optional[str] = None  # type이 wake일 때 실행할 기능
-    translated: Optional[str] = None   
+    translated: Optional[str] = None  # 대화 번역 모드에서 번역된 문장 (없으면 None)
+    mode: Optional[str] = None  # 현재 세션 상태 (idle | listening | dialog)
