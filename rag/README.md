@@ -6,8 +6,12 @@
 
 1. `cp .env.example .env` 후 값 채우기
    - `DB_*`: NCP pgvector Vector DB 접속 정보 (이미 클라우드에 데이터가 적재되어 있다면 생략 가능)
-   - `OLLAMA_BASE_URL`: LLM(Ollama, Qwen2.5)이 떠 있는 서버 주소. 이 서버와 다른 호스트일 수 있다
+   - `LLM_API_URL`: 별도 llm 서버가 제공하는 REST API 주소 (예: `http://<llm 서버>:8000/llm/replies`).
+     이 서버는 Ollama에 직접 붙지 않고 이 API를 통해서만 LLM을 호출한다
 2. (최초 1회, DB가 비어있을 때만) `python build_rag_db.py`로 `seoul_travel_data.json`을 DB에 적재
+
+검색 시 사용하는 임베딩 모델(`jhgan/ko-sroberta-multitask`)은 DB를 적재할 때 쓴 모델과
+반드시 동일해야 한다 (다르면 벡터 검색이 깨진다).
 
 ## 호출 or 실행 방법
 
@@ -17,15 +21,22 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env       # 값 입력
-uvicorn main:app --reload --port 8001
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
+요청/응답 상세 스펙은 [API.md](API.md) 참고.
+
 ```jsonc
-// POST http://localhost:8001/rag/qa
+// POST http://<서버 주소>:8000/rag/qa
 { "question": "경복궁 휴무일이 언제야?" }
 
 // 응답
-{ "answer": "경복궁은 매주 화요일에 휴무입니다." }
+{
+  "answer": "매주 화요일은 정기 휴궁일입니다. 하지만 공휴일과 겹치면 개방하고, 다음 첫 비공휴일이 휴궁일이 됩니다.",
+  "sources": [
+    { "id": "seoul_001", "title": "경복궁", "location": "서울특별시 종로구 사직로 161", "content": "..." }
+  ]
+}
 ```
 
 함수를 직접 호출할 수도 있습니다.
@@ -42,10 +53,9 @@ fastapi
 uvicorn[standard]
 python-dotenv
 pydantic
-langchain
-langchain-classic
-langchain-openai
+requests
 langchain-huggingface
+sentence-transformers
 langchain-postgres
 psycopg2-binary
 pgvector
@@ -61,6 +71,7 @@ rag/
 ├── seoul_travel_data.json
 ├── requirements.txt
 ├── .env.example
+├── API.md                # /rag/qa 요청/응답 스펙
 └── README.md
 ```
 
