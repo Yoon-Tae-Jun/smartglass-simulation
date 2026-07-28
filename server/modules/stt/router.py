@@ -29,8 +29,11 @@ FRAME_TIMEOUT = 3.0  # capture 요청 후 카메라 프레임을 기다리는 �
   {"action": "frame", "image": "<base64>"} capture 요청에 대한 응답
 쿼리:
 - language: 인식 언어 (ko | en | ja)
-- lat, lng: 현재 위치 좌표. 목적지만 말했을 때 길찾기 출발지로 사용된다
+- origin: 현재 위치 (도로명 주소 또는 상호명), 길찾기 출발지로 사용
 - execute: true면 명령어 감지 시 기능(map 등)까지 실행해서 결과를 함께 보냄
+- wake_word: true면 호출어("헤이 글래스")를 들어야 명령을 받는다. false면 항상 듣는다
+- listen_timeout: 호출어 뒤 명령을 받는 시간(초). 0 이하면 무제한
+                  (기본값은 server/.env의 STT_LISTEN_TIMEOUT, 없으면 10초)
 
 출력: 모두 BaseResponse JSON
 - data.type이 있으면 인식 이벤트 (partial | final | wake | status | capture)
@@ -42,9 +45,10 @@ FRAME_TIMEOUT = 3.0  # capture 요청 후 카메라 프레임을 기다리는 �
 async def stream(
     websocket: WebSocket,
     language: str = "ko",
-    lat: Optional[float] = None,
-    lng: Optional[float] = None,
+    origin: Optional[str] = None,
     execute: bool = True,
+    wake_word: bool = True,
+    listen_timeout: Optional[float] = None,
 ):
     await websocket.accept()
     loop = asyncio.get_running_loop()
@@ -80,6 +84,7 @@ async def stream(
         send(event_response)
 
         event = event_response.data
+        # 기능 실행은 wake 이벤트에서만 (partial/final/status는 실행 대상이 아니다)
         if not execute or event.type != "wake":
             return
 
@@ -95,7 +100,12 @@ async def stream(
         running.append(thread)
         thread.start()
 
-    session = CommandSession(on_event, language=language)
+    session = CommandSession(
+        on_event,
+        language=language,
+        listen_timeout=listen_timeout,
+        require_wake_word=wake_word,
+    )
     start_result = session.start()
     # 세션을 열지 못한 경우(키 미설정 등) 원인을 알려주고 종료
     if start_result.status != 200:
