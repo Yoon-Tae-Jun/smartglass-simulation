@@ -5,6 +5,13 @@
 - Base URL: `http://localhost:8000` (WebSocket은 `ws://localhost:8000`)
 - Swagger: `http://localhost:8000/docs` — REST만 표시된다 (WebSocket은 표시되지 않음)
 
+| 경로 | 방식 | 용도 |
+|---|---|---|
+| `/stt/ws` | WebSocket | **주 경로** — 음성 명령 + 실시간 대화 번역 |
+| `/map/search`, `/map/geocode`, `/map/directions` | REST | 지도 (음성 없이 직접 쓸 때) |
+| `/imgPapago/image` | POST | 이미지 번역 (카메라 캡처 → 번역 이미지) |
+| `/health`, `/example/ping` | GET | 상태 확인 |
+
 ## 목차
 - [공통 응답 포맷](#공통-응답-포맷)
 - [1. 음성 명령 — WebSocket `/stt/ws`](#1-음성-명령--websocket-sttws)
@@ -42,9 +49,9 @@ if (body.status !== 200) showError(body.msg);
 | 200 | 성공 |
 | 400 | 입력이 부족/이상함 (예: 목적지를 알아듣지 못함) |
 | 404 | 대상을 찾지 못함 (장소·경로 없음, 명령어 아님) |
-| 500 | 서버 설정 문제 (예: CLOVA 키 미설정) |
+| 500 | 서버 설정 문제 (예: CLOVA·파파고 키 미설정) |
 | 501 | 키워드는 잡혔지만 아직 구현되지 않은 기능 |
-| 502 | 외부 API(네이버·CLOVA) 호출 실패 |
+| 502 | 외부 API(네이버·CLOVA·파파고) 호출 실패 |
 
 ---
 
@@ -71,6 +78,31 @@ ws://localhost:8000/stt/ws?language=ko&lat=37.5666103&lng=126.9783882
 |---|---|
 | 바이너리 프레임 | 16kHz · 모노 · 16bit PCM 오디오 청크 |
 | 텍스트 프레임 | `{"action": "stop"}` — 종료 요청 |
+| 텍스트 프레임 | `{"action": "frame", "image": "<base64>"}` — `capture` 요청에 대한 응답 |
+
+#### 카메라 프레임 (`capture` ⇄ `frame`)
+
+"메뉴판 번역해줘"처럼 **눈앞의 글자**를 번역하는 명령은 서버가 화면을 봐야 한다.
+서버는 그 명령을 알아들은 **바로 그 순간** `capture` 이벤트를 보내 화면을 요청한다.
+클라이언트는 **그때 찍어서** 답하면 된다. 미리 보내둘 필요는 없다.
+
+```js
+// 서버 → 클라이언트
+{ "status": 200, "msg": "success",
+  "data": { "type": "capture", "text": "", "feature": null, "translated": null } }
+```
+
+```js
+// 클라이언트 → 서버 (곧바로 응답)
+if (d.type === 'capture') {
+  ws.send(JSON.stringify({ action: 'frame', image: webcam.capture() }))  // data URL 그대로 OK
+}
+```
+
+- 프레임이 도착하면 서버가 **즉시** 번역을 진행한다 (기다리는 시간 = 왕복 시간)
+- **3초** 안에 응답이 없으면 직전에 받아둔 프레임을 쓰고, 그것도 없으면
+  `400 카메라 화면을 받지 못했습니다`가 돌아온다
+- 형식/크기 제한은 [이미지 번역 REST](#3-이미지-번역-rest)와 같다 (JPG·PNG 등, 1960×1960px 이내)
 
 ### 두 가지 모드
 
@@ -89,16 +121,17 @@ ws://localhost:8000/stt/ws?language=ko&lat=37.5666103&lng=126.9783882
 
 ### 받는 것 (공통)
 
-메시지는 5종이고 전부 `BaseResponse`로 감싸여 있다.
-**`data.type`이 있으면 인식 이벤트(`partial`/`final`/`wake`/`status`), 없으면 기능 실행 결과다.**
+메시지는 6종이고 전부 `BaseResponse`로 감싸여 있다.
+**`data.type`이 있으면 인식 이벤트, 없으면 기능 실행 결과다.**
 
-| `data.type` | 언제 | 주요 필드 |
-|---|---|---|
-| `partial` | 말하는 동안 계속 갱신 | `text`, (dialog) `translated` |
-| `final` | 침묵 감지로 문장 확정 | `text`, (dialog) `translated` |
-| `wake` | 확정 문장에서 기능이 잡혔을 때 | `text`, `feature` |
-| `status` | 모드가 바뀌었을 때 | `text` = `"dialog"` \| `"command"` |
-| (없음) | 기능 실행 결과 | `feature`, `text`, `data` |
+| `data.type` | 언제 | 주요 필드 | 클라이언트가 할 일 |
+|---|---|---|---|
+| `partial` | 말하는 동안 계속 갱신 | `text`, (dialog) `translated` | 자막 갱신 |
+| `final` | 침묵 감지로 문장 확정 | `text`, (dialog) `translated` | 자막 확정 |
+| `wake` | 확정 문장에서 기능이 잡혔을 때 | `text`, `feature` | 해당 오버레이 켜기 |
+| `status` | 모드가 바뀌었을 때 | `text` = `"dialog"` \| `"command"` | 번역 UI 토글 |
+| `capture` | 이미지 번역에 화면이 필요할 때 | — | **즉시 `frame` 응답** |
+| (없음) | 기능 실행 결과 | `feature`, `text`, `data` | 결과 렌더 |
 
 이벤트 객체는 항상 `type` / `text` / `feature` / `translated` 4개 키를 가진다. 해당 없는 값은 `null`로 온다.
 
@@ -135,6 +168,12 @@ ws://localhost:8000/stt/ws?language=ko&lat=37.5666103&lng=126.9783882
 { "status": 200, "msg": "success",
   "data": { "feature": "navigate", "text": "경복궁까지 가는 길 알려줘",
             "data": { "origin": "...", "destination": "...", "summary": {...}, "path": [...] } } }
+
+// ④-2 이미지 번역도 같은 형태로 온다 (capture로 받아온 화면을 사용)
+{ "status": 200, "msg": "success",
+  "data": { "feature": "image", "text": "메뉴판 번역해줘",
+            "data": { "rendered_image": "iVBORw0...", "source_text": "ラーメン 800円",
+                      "target_text": "라멘 800엔" } } }
 ```
 
 `data.data`의 구조는 기능마다 다르다. `navigate`는 [지도 경로 응답](#post-mapdirections)과 같다.
@@ -247,7 +286,9 @@ ws.onmessage = (ev) => {
   if (res.status !== 200) return showError(res.msg);
 
   const d = res.data;
-  if (d.type === "status") {                    // 모드 전환 (dialog | command)
+  if (d.type === "capture") {                   // 지금 화면을 찍어 보내라는 요청
+    ws.send(JSON.stringify({ action: "frame", image: webcam.capture() }));
+  } else if (d.type === "status") {             // 모드 전환 (dialog | command)
     mode = d.text;
     toggleTranslateOverlay(mode === "dialog");
   } else if (d.type === "partial" || d.type === "final") {
@@ -487,12 +528,22 @@ WebSocket의 `wake` 이벤트에서 오는 `feature` 값이다.
 
 | feature | 트리거 키워드 | 상태 |
 |---|---|---|
+| `image` | 메뉴판, 간판, 표지판, 이미지 번역, 사진 번역, 화면 번역 | **동작** — 번역 이미지 반환 ([결과 형식](#post-imgpapagoimage)) |
 | `navigate` | 안내, 경로, 까지, 가는 길, 어떻게 가, 길 알려 | **동작** — 지도 경로 반환 |
 | `exchange` | 환율, 환전, 얼마, 가격, 원으로 | 미구현 (`501`) |
 | `qa` | 알려줘, 뭐야, 궁금, 찾아, 설명, 질문 | 미구현 (`501`) |
 
-번역/통역은 `feature`가 아니라 **모드 전환**이다. 키워드 목록에 없고 `wake`로도 오지 않으며,
-[dialog 모드](#1-2-dialog-모드-외국인-대화-번역)의 `status` 이벤트로 처리한다.
+사람과의 **대화 번역(통역)** 은 `feature`가 아니라 **모드 전환**이다. 키워드 목록에 없고 `wake`로도
+오지 않으며, [dialog 모드](#1-2-dialog-모드-외국인-대화-번역)의 `status` 이벤트로 처리한다.
+
+### "번역"이 들어간 말은 둘로 갈린다
+
+| 말한 문장 | 가는 곳 | 이유 |
+|---|---|---|
+| "메뉴판 번역해줘", "간판 뭐라고 써있어" | `wake feature=image` → 이미지 번역 | 눈앞의 **글자**를 가리킴 |
+| "번역해줘", "통역 켜줘", "외국인이랑 대화 번역" | `status: dialog` → 대화 번역 모드 | **사람**과의 대화 |
+
+이미지 쪽 키워드(`메뉴판`·`간판`·`표지판` 등)가 먼저 판정되고, 걸리지 않을 때만 dialog 모드로 간다.
 
 문장 판정(기능 키워드 + dialog 진입/종료어)은 전부 [`modules/stt/keyword_spotter.py`](modules/stt/keyword_spotter.py) 한 곳에 있고,
 기능 실행은 [`service.py`](service.py)에서 관리한다.
@@ -500,5 +551,3 @@ WebSocket의 `wake` 이벤트에서 오는 `feature` 값이다.
 ### 아직 없는 것
 
 - **환율(`exchange`) / 질문 응답(`qa`)** — 키워드만 등록되어 있고 핸들러가 없다.
-- **음성으로 이미지 번역 호출** — `/imgPapago/image`는 REST로만 열려 있다. 음성 명령과는 연결되지 않아
-  클라이언트가 버튼으로 캡처해서 직접 호출해야 한다.

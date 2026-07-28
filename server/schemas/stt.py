@@ -9,7 +9,9 @@ class CommandData(BaseModel):
 
 
 class CommandEvent(BaseModel):
-    type: str  # partial(중간 자막) | final(확정 문장) | wake(명령어 감지) | status(상태 변경)
+    # partial(중간 자막) | final(확정 문장) | wake(명령어 감지)
+    # | status(모드 전환: dialog/command) | capture(지금 화면을 찍어 보내라는 요청)
+    type: str
     text: str  # 현재까지 인식된 문장
     feature: Optional[str] = None  # type이 wake일 때 실행할 기능
     translated: Optional[str] = None  # 대화 번역 모드에서 번역된 문장 (없으면 None)

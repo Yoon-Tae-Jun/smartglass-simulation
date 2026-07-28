@@ -97,9 +97,11 @@ export default function SettingsPanel({
           </select>
         </label>
 
-        {/* 번역 언어 (양방향, 실시간 번역 전용) */}
+        {/* 번역 언어 — 실시간 번역은 양방향, 이미지 번역은 원본을 자동 판별하므로 '내 언어'만 쓴다 */}
         <div className="mt-3">
-          <span className="text-xs text-white/50">번역 언어</span>
+          <span className="text-xs text-white/50">
+            번역 언어{active === 'image' && <span className="text-white/30"> (원본 자동 판별)</span>}
+          </span>
           <div className="mt-1 flex items-center gap-1.5">
             <select
               value={settings.sourceLang}
@@ -124,7 +126,7 @@ export default function SettingsPanel({
             <select
               value={settings.targetLang}
               onChange={(e) => set({ targetLang: e.target.value })}
-              disabled={active !== 'translate'}
+              disabled={active !== 'translate' && active !== 'image'}
               className="min-w-0 flex-1 rounded-lg border border-white/15 bg-navy-deep px-2 py-1.5 text-sm text-white disabled:opacity-40"
               aria-label="내 언어"
             >
