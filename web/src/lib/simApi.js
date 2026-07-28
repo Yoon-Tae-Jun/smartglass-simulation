@@ -8,7 +8,10 @@
 
 // 백엔드 주소 (env 없으면 로컬 기본값). WS는 http→ws 로 파생.
 const HTTP_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
-const WS_BASE = HTTP_BASE.replace(/^http/, 'ws')
+const WS_BASE = HTTP_BASE
+  ? HTTP_BASE.replace(/^http/, 'ws')
+  : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
+
 
 // ── 길찾기 (F-MAP) ────────────────────────────────────────────
 // POST /map/directions — req: { origin(도로명주소), destination(상호명/주소) }
