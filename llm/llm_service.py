@@ -10,10 +10,14 @@ from schemas import (
     OcrRequest, OcrResponse
 )
 
-# [TODO: API 키 세팅]
-os.environ["OPENAI_API_KEY"] = "여기에_발급받은_API_키를_입력하세요"
+# 네이버 클라우드 Ollama 연동 설정
+os.environ["OPENAI_API_KEY"] = "ollama"
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm = ChatOpenAI(
+    model="qwen2.5",
+    temperature=0,
+    openai_api_base="http://10.0.2.6:11434/v1"
+)
 
 def extract_destination(req: DestinationRequest) -> DestinationResponse:
     structured_llm = llm.with_structured_output(DestinationResponse)
