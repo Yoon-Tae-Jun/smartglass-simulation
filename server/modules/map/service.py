@@ -59,22 +59,22 @@ def geocode(address: str) -> BaseResponse[Coordinate]:
 
 
 """
-좌표(위도/경도)를 도로명 주소로 변환하는 함수
+좌표(위도/경도)로 NAVER 역지오코딩을 조회하는 함수
 PARAMS:
-- coordinate: 변환할 좌표 (현재 위치 등)
+- coordinate: 변환할 좌표
+- orders: "roadaddr"(도로명) 또는 "addr"(지번). 함께 넣으면 403이 나서 따로 요청해야 한다
 
 RETURN:
-- BaseResponse[AddressInfo]: status=200이면 data에 도로명 주소, 실패하면 status/msg에 원인
+- 결과 목록 (없으면 빈 리스트)
 """
-@catch_request_errors
-def reverse_geocode(coordinate: Coordinate) -> BaseResponse[AddressInfo]:
+def _reverse_geocode_request(coordinate: Coordinate, orders: str) -> list:
     response = requests.get(
         REVERSE_GEOCODE_URL,
-        # coords는 "경도,위도" 순서, orders에 addr을 함께 넣으면 403이 나므로 roadaddr만 요청한다
+        # coords는 "경도,위도" 순서
         params={
             "coords": f"{coordinate.lng},{coordinate.lat}",
             "output": "json",
-            "orders": "roadaddr",
+            "orders": orders,
         },
         headers={
             "x-ncp-apigw-api-key-id": os.environ["MAP_CLIENT_ID"],
@@ -83,10 +83,46 @@ def reverse_geocode(coordinate: Coordinate) -> BaseResponse[AddressInfo]:
         },
     )
     response.raise_for_status()
+    return response.json().get("results") or []
 
-    body = response.json()
-    results = body.get("results") or []
-    # 바다 위 좌표처럼 주소가 없는 경우
+
+"""
+좌표(위도/경도)를 주소로 변환하는 함수
+PARAMS:
+- coordinate: 변환할 좌표 (현재 위치 등)
+
+RETURN:
+- BaseResponse[AddressInfo]: status=200이면 data에 주소, 실패하면 status/msg에 원인
+
+읍/면 등 도로명주소가 등록되지 않은 지역이 있어, 도로명 조회가 비면 지번주소로 한 번 더 시도한다.
+"""
+@catch_request_errors
+def reverse_geocode(coordinate: Coordinate) -> BaseResponse[AddressInfo]:
+    results = _reverse_geocode_request(coordinate, "roadaddr")
+    if results:
+        region = results[0]["region"]
+        land = results[0]["land"]
+        # 도로명이 있는 경우에만 조합: 시/도 + 시/군/구 + 도로명 + 건물번호(본번-부번)
+        if land["name"]:
+            building_number = land["number1"]
+            if land.get("number2"):
+                building_number += f"-{land['number2']}"
+
+            road_address = " ".join(
+                part
+                for part in [
+                    region["area1"]["name"],
+                    region["area2"]["name"],
+                    land["name"],
+                    building_number,
+                ]
+                if part
+            )
+            return success_response(AddressInfo(road_address=road_address))
+
+    # 도로명주소가 없는 지역(신설 도로 없음 등) — 지번주소로 폴백
+    results = _reverse_geocode_request(coordinate, "addr")
+    # 바다 위 좌표처럼 둘 다 없는 경우
     if not results:
         return error_response(
             404, f"좌표에 해당하는 주소가 없습니다: {coordinate.lat},{coordinate.lng}"
@@ -94,28 +130,23 @@ def reverse_geocode(coordinate: Coordinate) -> BaseResponse[AddressInfo]:
 
     region = results[0]["region"]
     land = results[0]["land"]
-    # 도로명 주소 조합: 시/도 + 시/군/구 + 도로명 + 건물번호(본번-부번)
-    building_number = land["number1"]
+    # 지번주소 조합: 시/도 + 시/군/구 + 읍/면/동 + (리) + 지번(본번-부번)
+    lot_number = land["number1"]
     if land.get("number2"):
-        building_number += f"-{land['number2']}"
+        lot_number += f"-{land['number2']}"
 
-    road_address = " ".join(
+    jibun_address = " ".join(
         part
         for part in [
             region["area1"]["name"],
             region["area2"]["name"],
-            land["name"],
-            building_number,
+            region["area3"]["name"],
+            region.get("area4", {}).get("name"),
+            lot_number,
         ]
         if part
     )
-    # 도로명이 없는 지역(신설 도로 등)인 경우
-    if not land["name"]:
-        return error_response(
-            404, f"좌표에 해당하는 도로명 주소가 없습니다: {coordinate.lat},{coordinate.lng}"
-        )
-
-    return success_response(AddressInfo(road_address=road_address))
+    return success_response(AddressInfo(road_address=jibun_address))
 
 
 """

@@ -12,7 +12,7 @@ class PlaceInfo(BaseModel):
 
 
 class AddressInfo(BaseModel):
-    road_address: str  # 도로명 주소
+    road_address: str  # 도로명 주소 (없는 지역은 지번주소로 대체될 수 있음)
 
 
 class DirectionsRequest(BaseModel):
