@@ -1,30 +1,40 @@
-# 파일 위치: rag/llm_service.py
+# 파일 위치: rag/rag_service.py
 # 질문 응답 함수
 
 import os
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
+from langchain_huggingface import HuggingFaceEmbeddings  # 🚨 오픈소스 임베딩 라이브러리로 변경
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_postgres.vectorstores import PGVector
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from schemas import RagRequest, RagResponse
 
-# [TODO: API 키 및 DB 접속 정보 세팅]
-os.environ["OPENAI_API_KEY"] = "여기에_발급받은_API_키를_입력하세요"
+# Ollama 연동 우회를 위한 가짜 키 (LangChain 구조상 비워둘 수 없어 더미값 유지)
+os.environ["OPENAI_API_KEY"] = "ollama"
 
-DB_USER = "DB_아이디"
-DB_PASSWORD = "DB_비밀번호"
-DB_HOST = "DB_접속주소"
+# DB 접속 정보 세팅 (수정 완료)
+DB_USER = "dauser"
+DB_PASSWORD = "db1234!!"
+DB_HOST = "10.0.2.9"
 DB_PORT = "5432"
-DB_NAME = "DB_이름"
+DB_NAME = "soboro_db"
 CONNECTION_STRING = f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 COLLECTION_NAME = "seoul_travel_docs"
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+# LLM은 로컬 Ollama (Qwen2.5) 사용
+llm = ChatOpenAI(
+    model="qwen2.5",
+    temperature=0,
+    openai_api_base="http://10.0.2.6:11434/v1"
+)
+
 
 def question_answering_rag(req: RagRequest) -> RagResponse:
     """기능 C: 질문 응답 RAG"""
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+    embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
+
     vectorstore = PGVector(
         embeddings=embeddings,
         collection_name=COLLECTION_NAME,
