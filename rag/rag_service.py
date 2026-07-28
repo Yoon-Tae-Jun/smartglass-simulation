@@ -2,27 +2,33 @@
 # 질문 응답 함수
 
 import os
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from langchain_huggingface import HuggingFaceEmbeddings  # 🚨 오픈소스 임베딩 라이브러리로 변경
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_postgres.vectorstores import PGVector
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from schemas import RagRequest, RagResponse
 
-# Ollama 연동 우회를 위한 가짜 키 (LangChain 구조상 비워둘 수 없어 더미값 유지)
+# 1. .env 파일에 숨겨둔 정보들을 파이썬이 읽어오도록 실행합니다.
+load_dotenv()
+
+# Ollama 연동 우회를 위한 가짜 키 (LangChain 구조상 필수)
 os.environ["OPENAI_API_KEY"] = "ollama"
 
-# DB 접속 정보 세팅 (수정 완료)
-DB_USER = "dbuser"
-DB_PASSWORD = "db1234!!"
-DB_HOST = "10.0.2.9"
-DB_PORT = "5432"
-DB_NAME = "soboro_db"
+# 2. os.getenv()를 통해 .env 파일에서 실제 값을 가져와 변수에 담습니다.
+# 코드를 보는 사람에겐 변수 이름만 보이고 실제 비밀번호는 보이지 않습니다!
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT")
+DB_NAME = os.getenv("DB_NAME")
+
 CONNECTION_STRING = f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 COLLECTION_NAME = "seoul_travel_docs"
 
-# LLM은 로컬 Ollama (Qwen2.5) 사용
+# LLM은 서버에 설치된 로컬 Ollama (Qwen2.5) 사용
 llm = ChatOpenAI(
     model="qwen2.5",
     temperature=0,
@@ -33,6 +39,7 @@ llm = ChatOpenAI(
 def question_answering_rag(req: RagRequest) -> RagResponse:
     """기능 C: 질문 응답 RAG"""
 
+    # 한국어 처리에 뛰어난 무료 오픈소스 로컬 임베딩 모델 사용
     embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
 
     vectorstore = PGVector(
