@@ -2,20 +2,15 @@
 # 질문 응답 함수
 
 import os
+
+import requests
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_postgres.vectorstores import PGVector
-from langchain_classic.chains import create_retrieval_chain
-from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-from rag.rag_schemas import RagRequest, RagResponse
+from rag_schemas import RagRequest, RagResponse, RagSource
 
 # 1. .env 파일에 숨겨둔 정보들을 파이썬이 읽어오도록 실행합니다.
 load_dotenv()
-
-# Ollama 연동 우회를 위한 가짜 키 (LangChain 구조상 필수)
-os.environ["OPENAI_API_KEY"] = "ollama"
 
 # 2. os.getenv()를 통해 .env 파일에서 실제 값을 가져와 변수에 담습니다.
 # 코드를 보는 사람에겐 변수 이름만 보이고 실제 비밀번호는 보이지 않습니다!
@@ -28,11 +23,12 @@ DB_NAME = os.getenv("DB_NAME")
 CONNECTION_STRING = f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 COLLECTION_NAME = "seoul_travel_docs"
 
-# LLM은 서버에 설치된 로컬 Ollama (Qwen2.5) 사용
-llm = ChatOpenAI(
-    model="qwen2.5",
-    temperature=0,
-    openai_api_base="http://127.0.0.1:11434/v1"
+# LLM은 별도 llm 서버가 REST API로 감싸서 서비스 중이므로 Ollama에는 직접 붙지 않는다
+LLM_API_URL = os.getenv("LLM_API_URL", "http://127.0.0.1:8000/llm/replies")
+
+SYSTEM_PROMPT = (
+    "너는 서울을 여행하는 외국인 관광객을 돕는 스마트 글래스 AI 가이드야.\n"
+    "아래에 제공된 [검색된 문서 내용]을 최우선으로 참고하되, 정보가 부족하면 네 지식을 최대한 활용해 답변해."
 )
 
 
@@ -48,20 +44,29 @@ def question_answering_rag(req: RagRequest) -> RagResponse:
         connection=CONNECTION_STRING,
         use_jsonb=True,
     )
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+    docs = vectorstore.similarity_search(req.question, k=3)
+    context = "\n\n".join(doc.page_content for doc in docs)
 
-    system_prompt = (
-        "너는 서울을 여행하는 외국인 관광객을 돕는 스마트 글래스 AI 가이드야.\n"
-        "아래에 제공된 [검색된 문서 내용]을 최우선으로 참고하되, 정보가 부족하면 네 지식을 최대한 활용해 답변해.\n\n"
-        "[검색된 문서 내용]\n{context}"
+    prompt = (
+        f"{SYSTEM_PROMPT}\n\n[검색된 문서 내용]\n{context}\n\n[질문]\n{req.question}"
     )
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human", "{input}")
-    ])
 
-    question_answer_chain = create_stuff_documents_chain(llm, prompt)
-    rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+    response = requests.post(LLM_API_URL, json={"context": prompt}, timeout=30)
+    response.raise_for_status()
 
-    result = rag_chain.invoke({"input": req.question})
-    return RagResponse(answer=result["answer"])
+    # llm 서버는 실패해도 HTTP 200을 반환하고 본문의 status/data로 성공 여부를 알린다
+    body = response.json()
+    data = body.get("data") or {}
+    answer = data.get("answer") or f"답변을 생성하지 못했습니다: {body.get('msg', '')}"
+
+    sources = [
+        RagSource(
+            id=doc.metadata.get("id", ""),
+            title=doc.metadata.get("title", ""),
+            location=doc.metadata.get("location", ""),
+            content=doc.page_content,
+        )
+        for doc in docs
+    ]
+
+    return RagResponse(answer=answer, sources=sources)
