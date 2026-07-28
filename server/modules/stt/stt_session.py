@@ -1,12 +1,12 @@
 import grpc, json, queue, threading
 import nest_pb2, nest_pb2_grpc
 
-CLOVA_ENDPOINT = "clovaspeech-gw.ncloud.com:50051"
 SILENCE_FLUSH = 3
 
 class STTSession:
-    def __init__(self, secret, language="ko", translate_to=None, on_result=None, debug=False):
+    def __init__(self, secret, endpoint, language="ko", translate_to=None, on_result=None, debug=False):
         self.secret = secret
+        self.endpoint = endpoint  # CLOVA_SPEECH_INVOKE_URL (host:port)
         self.language = language
         self.translate_to = translate_to
         self.on_result = on_result or (lambda r: None)
@@ -29,7 +29,7 @@ class STTSession:
             self._seq += 1
 
     def start(self):
-        ch = grpc.secure_channel(CLOVA_ENDPOINT, grpc.ssl_channel_credentials())
+        ch = grpc.secure_channel(self.endpoint, grpc.ssl_channel_credentials())
         stub = nest_pb2_grpc.NestServiceStub(ch)
         meta = (("authorization", f"Bearer {self.secret}"),)
         def run():

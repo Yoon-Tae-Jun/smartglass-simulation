@@ -3,7 +3,7 @@
 담당: ② 지유찬 (`yc/stt`) · CLOVA Speech 기반 음성 인식 + 키워드 스포팅
 데모 기준 도시: 서울
 
-내 명령(실시간)과 상대 대화(한/영 자동)를 모두 인식해, 4개 기능이 공유하는 표준 텍스트/신호를 제공한다.
+내 명령(한국어)과 상대 대화(영어→한국어 번역)를 WebSocket 하나로 모두 인식해, 4개 기능이 공유하는 표준 텍스트/신호를 제공한다.
 
 ---
 
@@ -53,16 +53,23 @@ python -m grpc_tools.protoc --proto_path=. --python_out=. --grpc_python_out=. ne
 클라이언트가 쓰는 경로는 이 WebSocket 하나다. 명령어 판별·기능 실행은 서버 내부에서 처리한다
 ([`service.py`](service.py) → [`server/service.py`](../../service.py) → 기능 모듈).
 
-## 2. 상대 대화 인식 — 장문 REST (한/영 자동)
+## 2. 상대 대화 인식 — dialog 모드 (같은 WebSocket)
 
-> 현재 엔드포인트 미연결 상태. 인식 함수(`long_stt.recognize_bytes`)만 있고, `service.py`/`router.py`에 아직 붙이지 않았다.
+별도 엔드포인트 없이 위의 `/stt/ws` 소켓 안에서 모드만 바꾼다.
 
-- `POST /stt/dialog` (예정) — 오디오 파일(multipart, 필드명 `audio`) → `{"text":"..."}`
-- 한/영 동시 인식(`enko`) 사용 → 상대가 한국어/영어 섞어 말해도 자동 인식
-- 반환된 `text`는 ③(LLM)이 번역
-- 언어값 참고: `enko`(한/영) · `ko-KR` · `en-US` · `ja` · `zh-cn` · `zh-tw`
+- 진입: 확정 문장에 `번역`/`통역`/`외국인`/`외국어` 중 하나가 있으면 자동 전환 (`is_dialog_start()`)
+- 종료: dialog 모드 확정 문장에 `stop` 또는 `exit`가 있으면 command 모드로 복귀
+- 전환 시 서버가 `{"type":"status","text":"dialog"|"command"}` 이벤트를 보낸다
+- 인식은 `en`, 번역은 `ko` 고정 — CLOVA 스트림의 번역 옵션을 쓰므로 별도 API 호출이 없다
+- 자막 이벤트에 `translated`(한국어 번역)가 함께 실린다
 
-동작: ① 상대 발화 녹음 → `POST /api/dialog-stt` → ② 인식 텍스트 반환 → ③ 번역 → ① 표시
+```jsonc
+{ "status": 200, "msg": "success",
+  "data": { "type": "final", "text": "Where is the subway station?",
+            "feature": null, "translated": "지하철역이 어디에 있나요?" } }
+```
+
+CLOVA 설정(`language`/`translation`)은 스트림 첫 프레임에만 실리므로, 모드가 바뀌면 gRPC 세션을 닫고 새로 연다.
 
 ---
 
@@ -82,8 +89,7 @@ python -m grpc_tools.protoc --proto_path=. --python_out=. --grpc_python_out=. ne
 | 파일 | 역할 |
 |---|---|
 | `service.py` | 모듈 진입점 — 실시간 명령어 인식 세션(`CommandSession`), 명령어 판별(`detect_command`) |
-| `stt_session.py` | 실시간 STT 재사용 세션(gRPC) |
-| `long_stt.py` | 장문 REST 인식(한/영 enko) |
+| `stt_session.py` | 실시간 STT 재사용 세션(gRPC) — 인식 언어/번역 설정도 여기서 지정 |
 | `keyword_spotter.py` | 키워드 → 기능 매핑 |
 | `nest.proto`, `nest_pb2*.py` | CLOVA Speech gRPC 정의/생성물 |
 

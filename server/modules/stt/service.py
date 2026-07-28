@@ -8,21 +8,11 @@ from schemas.stt import CommandData, CommandEvent
 from utils.env import load_env
 from utils.errors import error_response, success_response
 
-from .keyword_spotter import detect_feature
+from .keyword_spotter import detect_feature, is_dialog_end, is_dialog_start
 from .stt_session import STTSession
 
 load_env()
 DEFAULT_TIMEOUT = 15.0
-
-
-def is_dialog_start(text: str) -> bool:
-    """'외국인과 대화 번역해줘' 같은 대화 번역 시작 명령 판별"""
-    t = text.replace(" ", "")
-    if any(k in t for k in ("외국인", "외국어", "통역")):
-        return True
-    if "대화" in t and ("번역" in t or "통역" in t):
-        return True
-    return False
 
 
 class CommandSession:
@@ -33,11 +23,14 @@ class CommandSession:
         self.language = language
         self._session: Optional[STTSession] = None
         self._secret: Optional[str] = None
+        self._endpoint: Optional[str] = None
         self._mode = "command"
 
     def start(self) -> BaseResponse[None]:
+        # load_env() 이후에 읽어야 하므로 모듈 상단이 아니라 여기서 가져온다
         self._secret = os.environ.get("CLOVA_SPEECH_SECRET")
-        if not self._secret:
+        self._endpoint = os.environ.get("CLOVA_SPEECH_INVOKE_URL")
+        if not self._secret or not self._endpoint:
             return error_response(500, "CLOVA Speech 환경변수가 설정되지 않았습니다")
         self._open("command", self.language, None)
         return success_response(None)
@@ -47,7 +40,7 @@ class CommandSession:
             self._session.close()
         self._mode = mode
         self._session = STTSession(
-            self._secret, language=language, translate_to=translate_to,
+            self._secret, self._endpoint, language=language, translate_to=translate_to,
             on_result=self._handle_result,
         )
         self._session.start()
@@ -79,11 +72,9 @@ class CommandSession:
                 self._emit(CommandEvent(type="wake", text=text, feature=feature))
         else:                                              # dialog 모드: 영어→한국어 번역
             self._emit(CommandEvent(type=event_type, text=text, translated=translated))
-            if event_type == "final":
-                low = text.lower()
-                if "stop" in low or "exit" in low:         # 대화 종료
-                    self._emit(CommandEvent(type="status", text="command"))
-                    self._open("command", self.language, None)
+            if event_type == "final" and is_dialog_end(text):   # 대화 종료
+                self._emit(CommandEvent(type="status", text="command"))
+                self._open("command", self.language, None)
 
     def _emit(self, event: CommandEvent) -> None:
         try:
