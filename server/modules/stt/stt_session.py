@@ -120,7 +120,9 @@ class STTSession:
         seg_translated = self._translation_of(data)
 
         if seg_translated:
-            self._translated += seg_translated
+            # mergedResult=True라서 translation은 매 응답마다 "지금까지 인식된 전체 문장"을
+            # 다시 번역해 통으로 내려준다. text(원문)처럼 조각을 이어붙이면 안 되고 교체해야 한다.
+            self._translated = seg_translated
 
         if seg.strip():                       # 실제 음성 조각 → 누적
             self._buffer += seg
