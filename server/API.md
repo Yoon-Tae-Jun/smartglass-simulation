@@ -10,6 +10,7 @@
 | `/stt/ws` | WebSocket | **주 경로** — 음성 명령 + 실시간 대화 번역 |
 | `/map/search`, `/map/geocode`, `/map/directions` | REST | 지도 (음성 없이 직접 쓸 때) |
 | `/imgPapago/image` | POST | 이미지 번역 (카메라 캡처 → 번역 이미지) |
+| `/rag/qa` | POST | 질문 응답 (서울 여행 RAG) |
 | `/health` | GET | 상태 확인 |
 
 ## 목차
@@ -19,7 +20,8 @@
   - [1-2. dialog 모드 (외국인 대화 번역)](#1-2-dialog-모드-외국인-대화-번역)
 - [2. 지도 REST](#2-지도-rest)
 - [3. 이미지 번역 REST](#3-이미지-번역-rest)
-- [4. 기타](#4-기타)
+- [4. 질문 응답 REST](#4-질문-응답-rest)
+- [5. 기타](#5-기타)
 - [기능(feature) 목록](#기능feature-목록)
 
 ---
@@ -574,7 +576,61 @@ multipart 요청을 보낸다. 이 엔드포인트는 번역문을 **원본 이�
 
 ---
 
-## 4. 기타
+## 4. 질문 응답 REST
+
+### POST `/rag/qa`
+
+서울 관광지/맛집 관련 질문에 답한다. 이 서버가 직접 검색·생성을 하는 게 아니라, 별도로 띄워둔
+RAG 서버(pgvector 검색 + LLM)에 그대로 위임하는 얇은 프록시다. RAG 서버 자체 문서는
+[`../RAG_API.md`](../RAG_API.md) 참고.
+
+```jsonc
+// 요청
+{ "question": "경복궁 휴무일이 언제야?" }
+```
+
+```jsonc
+// 응답
+{
+  "status": 200,
+  "msg": "success",
+  "data": {
+    "answer": "매주 화요일은 정기 휴궁일입니다. 하지만 공휴일과 겹치면 개방하고, ...",
+    "sources": [
+      {
+        "id": "seoul_001",
+        "title": "경복궁",
+        "location": "서울특별시 종로구 사직로 161",
+        "content": "[관광지] 경복궁\n키워드: 경복궁, 고궁, 한복, ...\n내용: ..."
+      }
+    ]
+  }
+}
+```
+
+- `sources`: 답변 생성에 참조한 검색 문서 목록 (관련도 순 최대 3개)
+
+| status | 언제 |
+|---|---|
+| 502 | RAG 서버 호출 실패 (`RAG_URL` 미설정, RAG 서버 다운, pgvector/LLM 내부 오류 등) |
+
+음성 명령(`wake feature=qa`)에서도 동일하게 이 함수를 호출한다 — 인식된 문장을 그대로
+질문으로 넘긴다 (`server/service.py`의 `qa` 핸들러 참고).
+
+```js
+const res = await fetch(`${BASE}/rag/qa`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ question: '경복궁 휴무일이 언제야?' }),
+})
+const body = await res.json()
+if (body.status !== 200) return showError(body.msg)
+renderAnswer(body.data.answer, body.data.sources)
+```
+
+---
+
+## 5. 기타
 
 ### GET `/health`
 
@@ -595,7 +651,7 @@ WebSocket의 `wake` 이벤트에서 오는 `feature` 값이다.
 | `image` | 메뉴판, 간판, 표지판, 이미지 번역, 사진 번역, 화면 번역 | **동작** — 번역 이미지 반환 ([결과 형식](#post-imgpapagoimage)) |
 | `navigate` | 안내, 경로, 까지, 가는 길, 어떻게 가, 길 알려 | **동작** — 지도 경로 반환 |
 | `exchange` | 환율, 환전, 얼마, 가격, 원으로 | 미구현 (`501`) |
-| `qa` | 알려줘, 뭐야, 궁금, 찾아, 설명, 질문 | 미구현 (`501`) |
+| `qa` | 알려줘, 뭐야, 궁금, 찾아, 설명, 질문 | **동작** — RAG 답변 반환 ([결과 형식](#4-질문-응답-rest)) |
 
 사람과의 **대화 번역(통역)** 은 `feature`가 아니라 **모드 전환**이다. 키워드 목록에 없고 `wake`로도
 오지 않으며, [dialog 모드](#1-2-dialog-모드-외국인-대화-번역)의 `status` 이벤트로 처리한다.
@@ -616,4 +672,4 @@ dialog 진입/종료 판정은 [`modules/stt/service.py`](modules/stt/service.py
 
 ### 아직 없는 것
 
-- **환율(`exchange`) / 질문 응답(`qa`)** — 키워드만 등록되어 있고 핸들러가 없다.
+- **환율(`exchange`)** — 키워드만 등록되어 있고 핸들러가 없다.

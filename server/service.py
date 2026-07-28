@@ -16,11 +16,13 @@ from typing import Callable, Dict, Optional, Union
 
 from modules.imgPapago.service import translate_image
 from modules.map.service import get_directions, reverse_geocode
+from modules.rag.service import question_answering_rag
 from modules.stt.service import detect_command
 from schemas.base import BaseResponse
 from schemas.command import CommandContext, CommandResult
 from schemas.imgpapago import ImageTranslationRequest
 from schemas.map import Coordinate, DirectionsRequest
+from schemas.rag import RagRequest
 from schemas.stt import CommandData
 from utils.errors import error_response, success_response
 
@@ -180,6 +182,23 @@ def image_translate(context: CommandContext) -> BaseResponse:
         )
 
     return translate_image(ImageTranslationRequest(image=context.image))
+
+
+# ----------------------------------------------------------------------- qa --
+
+"""
+질문 응답 기능: 인식된 문장을 그대로 RAG 서버에 넘겨 답을 받아오는 함수
+
+PARAMS:
+- context: 인식 문장 (질문)
+
+RETURN:
+- BaseResponse[RagResponse]: status=200이면 data에 답변 + 참조 문서,
+  실패하면 status/msg에 원인 (RAG 서버 호출 실패 시 502)
+"""
+@feature("qa")
+def qa(context: CommandContext) -> BaseResponse:
+    return question_answering_rag(RagRequest(question=context.text))
 
 
 # ---------------------------------------------------------------- dispatch --
