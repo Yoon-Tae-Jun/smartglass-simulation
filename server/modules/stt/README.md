@@ -41,6 +41,8 @@ python -m grpc_tools.protoc --proto_path=. --python_out=. --grpc_python_out=. ne
     `{"action":"wake","mode":"dialog"}`면 대화 번역 모드로 직행
   - `{"action":"sleep"}` 호출어 대기 상태로 복귀
 - 소켓은 화면 진입 시 한 번 열고 유지한다. 호출어 대기(`idle`) 중에는 이벤트를 보내지 않는다
+- **명령은 한 번에 하나다.** `wake` 이벤트가 나가면 곧바로 `idle`로 돌아가므로 다음 명령은
+  호출어를 다시 불러야 한다. 기능 실행은 별도 스레드라 결과·`capture`는 그 뒤에 도착한다
 - 출력: 모두 공통 포맷 [`BaseResponse`](../../schemas/base.py)로 감싼 JSON
 
 ```jsonc

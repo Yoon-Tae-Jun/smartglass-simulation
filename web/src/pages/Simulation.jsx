@@ -65,6 +65,7 @@ export default function Simulation() {
   const commandRef = useRef(null) // 콜백 클로저에서 최신 명령을 참조
   const voiceModeRef = useRef('idle') // 콜백 클로저에서 최신 세션 상태를 참조
   const voiceFeatureRef = useRef(null) // 음성 세션이 묶인 기능(null=호출어 경로, 서버 자유 라우팅)
+  const wakeByButtonRef = useRef(false) // 이번 listening 진입이 기능 버튼 때문인지
   const pendingWakeRef = useRef(null) // 소켓이 열리기 전에 누른 기능 버튼 { mode }
   const imageSession = useRef(0) // 번역 응답이 도착했을 때 아직 유효한 요청인지 판별
   const imagePendingRef = useRef(false) // 콜백 클로저에서 최신 진행 여부를 참조
@@ -137,6 +138,7 @@ export default function Simulation() {
     // 세션은 화면 진입 때 열어둔 하나를 계속 쓰므로 재접속이 없다.
     if (next && VOICE_FEATURES.has(next)) {
       voiceFeatureRef.current = next // 그 기능에 고정 (다른 기능이 감지돼도 오버레이를 안 바꾼다)
+      wakeByButtonRef.current = true // 뒤따라 올 listening 상태에서 이 고정을 유지한다
       setVoiceDirections(null)
       setCommandError(null)
       setCommand(null)
@@ -207,13 +209,19 @@ export default function Simulation() {
       setVoiceMode(next)
       setDialogLine(null)
       if (next === 'idle') {
-        // 호출어 대기로 돌아가면 고정도 풀린다 (오버레이는 결과를 볼 수 있게 그대로 둔다)
-        voiceFeatureRef.current = null
+        // 명령 하나를 실행하면 서버가 곧바로 여기로 돌아온다. 기능 고정은 아직 풀지 않는다
+        // — 실행 결과가 뒤따라 오므로, 그때까지는 그 기능의 것만 받아야 한다.
         setVoiceCaption(null)
       } else {
         setVoiceCaption({ text: evt.text })
-        if (next === 'dialog') {
+        if (next === 'listening') {
+          // 호출어로 들어왔다면 이전에 눌러둔 기능 고정을 푼다 (버튼으로 들어온 경우만 유지).
+          // 안 그러면 지난번 버튼의 기능이 다음 명령까지 계속 걸러낸다.
+          if (!wakeByButtonRef.current) voiceFeatureRef.current = null
+          wakeByButtonRef.current = false
+        } else if (next === 'dialog') {
           // 말로 대화 번역에 들어온 경우에도 번역 오버레이를 띄운다
+          wakeByButtonRef.current = false
           voiceFeatureRef.current = 'translate'
           setCommandError(null)
           setActiveFeature('translate')
@@ -296,6 +304,7 @@ export default function Simulation() {
   // 세션 자체는 계속 열려 있으므로 서버 상태(idle ↔ listening)만 오간다.
   function toggleVoice() {
     voiceFeatureRef.current = null // 어떤 기능이 올지 모르는 자유 라우팅
+    wakeByButtonRef.current = false
     if (listening) {
       requestSleep()
       return

@@ -63,9 +63,13 @@ class CommandSession:
 
     동작 흐름
     1) idle      : "헤이 글래스"를 들을 때까지 아무것도 내보내지 않는다
-    2) listening : 명령을 받는다. listen_timeout초 동안 말이 없으면 idle로 복귀
+    2) listening : 명령을 받는다. 명령 하나를 잡으면 곧바로 idle로 돌아가고(한 번에 한 명령),
+                   못 잡은 채 listen_timeout초 동안 말이 없어도 idle로 복귀
     3) dialog    : "외국인과 대화할거야" 같은 말을 들으면 진입.
                    주고받는 대화라서 타임아웃 없이 유지되고, "stop"이라고 하면 종료
+
+    기능 실행 자체는 이 세션이 하지 않는다(라우터가 별도 스레드에서 처리). 그래서 idle로
+    돌아간 뒤에도 실행 결과와 capture 요청은 그대로 나간다.
     """
 
     """
@@ -311,6 +315,10 @@ class CommandSession:
             self._emit(
                 CommandEvent(type="wake", text=text, feature=feature, mode=MODE_LISTENING)
             )
+            # 명령 하나를 처리했으면 곧바로 호출어 대기로 돌아간다 (한 번에 한 명령).
+            # 기능 실행(길찾기·이미지 번역)은 이 세션과 별개인 스레드에서 계속 진행되므로
+            # 결과와 capture 요청은 대기 상태로 돌아간 뒤에도 그대로 전달된다.
+            self._sleep("명령을 실행합니다. 다시 부르시면 들을게요")
 
     # 콜백에서 예외가 나도 인식 스레드가 죽지 않도록 감싼다
     def _emit(self, event: CommandEvent) -> None:

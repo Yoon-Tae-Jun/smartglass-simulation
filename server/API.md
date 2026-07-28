@@ -122,20 +122,28 @@ if (d.type === 'capture') {
 | 상태 | 하는 일 | 인식 언어 |
 |---|---|---|
 | `idle` (기본) | 호출어만 기다린다. **이벤트를 하나도 보내지 않는다** | 쿼리 `language` (기본 `ko`) |
-| `listening` | 명령어 감지 → 기능 실행. 말이 없으면 `listen_timeout` 뒤 `idle`로 | 쿼리 `language` |
+| `listening` | 명령어를 기다린다. **명령 하나를 잡으면 곧바로 `idle`로 돌아간다.** 말이 없으면 `listen_timeout` 뒤 `idle`로 | 쿼리 `language` |
 | `dialog` | 상대(외국인) 말을 인식해 한국어 번역을 함께 반환. 타임아웃 없음 | `en` 고정 → `ko` 번역 |
 
 ```
 연결 → idle
   "헤이 글래스"                → mode:"listening"  (또는 클라이언트가 {"action":"wake"})
-  "경복궁까지 안내해줘"         → wake feature=navigate → 기능 실행
-  "고마워" / listen_timeout 초과 → mode:"idle"      (또는 {"action":"sleep"})
+  "경복궁까지 안내해줘"         → wake feature=navigate
+                              → mode:"idle"       (명령을 잡는 즉시 대기로 복귀)
+                              → 기능 실행 결과      (대기로 돌아간 뒤에 도착한다)
+  (명령을 못 잡으면 계속 listening, listen_timeout 초과 시 idle)
+  "고마워"                     → mode:"idle"       (또는 {"action":"sleep"})
 
 listening
   "외국인이랑 대화 번역해줘"     → mode:"dialog"    (또는 {"action":"wake","mode":"dialog"})
 dialog
   "stop" 또는 "exit"           → mode:"idle"
 ```
+
+> **명령은 한 번에 하나다.** `wake` 이벤트가 나가면 서버는 바로 `idle`로 돌아가므로,
+> 다음 명령을 하려면 호출어를 다시 부르거나 `{"action":"wake"}`를 보내야 한다.
+> 기능 실행(길찾기·이미지 번역)은 별도 스레드에서 계속되므로 **실행 결과와 `capture` 요청은
+> `idle`로 돌아간 뒤에 도착한다.** `idle`이 왔다고 진행 중인 요청을 취소하면 안 된다.
 
 `idle`에서는 자막(`partial`/`final`)도 나가지 않는다. 호출어를 한 문장에 이어 말한 경우
 ("헤이 글래스, 환율 알려줘")는 호출어 뒷부분만 명령으로 처리된다.
@@ -221,9 +229,12 @@ dialog
   → partial "경복궁까지 가는 길 알려줘"
   → final   "경복궁까지 가는 길 알려줘"
   → wake    feature=navigate
+  → status  mode=idle ("명령을 실행합니다. 다시 부르시면 들을게요")
        (서버 내부: 좌표 → "서울특별시 중구 세종대로 110" 역변환 → 경로 조회)
   → 실행 결과 (거리 2,244m / 예상 택시비 5,900원)
 ```
+
+이미지 번역도 같다. `wake` → `status mode=idle` → `capture` → (`frame` 응답) → 실행 결과 순으로 온다.
 
 `{"action":"stop"}`을 보낸 뒤에도 실행 중인 기능 결과가 있으면 그것까지 보내고 소켓이 닫힌다(최대 10초 대기).
 
