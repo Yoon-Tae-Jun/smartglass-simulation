@@ -38,7 +38,7 @@ export default function TranslateOverlay({
     <div className="pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-6">
       <div className="hud-chip max-w-2xl text-center">
         <span className="flex items-center justify-center gap-2 eyebrow text-sky/70">
-          실시간 음성 번역 · {activeLangs.source} <span className="text-sky">⇄</span> {activeLangs.target}
+          음성 번역 · {activeLangs.source} <span className="text-sky">⇄</span> {activeLangs.target}
         </span>
         {body}
       </div>

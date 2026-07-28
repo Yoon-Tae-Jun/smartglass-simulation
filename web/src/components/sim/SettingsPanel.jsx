@@ -1,4 +1,6 @@
-// 설정 패널 (상단 톱바 ⚙ 버튼이 여는 팝오버 콘텐츠).
+import { X } from 'lucide-react'
+
+// 설정 패널 (상단 톱바 설정 버튼이 여는 팝오버 콘텐츠).
 // 기능별 설정(여행 지역, 카메라, 번역 언어, TTS 등)을 조정한다.
 // 설정값은 아직 mock 파이프라인에 직접 연결되지 않았으나, 백엔드 연동 시
 // startTranslateStream / askQuestion 등에 전달할 자리다.
@@ -41,7 +43,7 @@ export default function SettingsPanel({
             aria-label="설정 닫기"
             className="rounded-lg px-2 py-0.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
           >
-            ✕
+            <X className="h-4 w-4" strokeWidth={1.75} />
           </button>
         )}
       </div>

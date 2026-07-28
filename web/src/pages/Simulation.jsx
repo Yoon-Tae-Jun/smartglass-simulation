@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Compass, Image as ImageIcon, Languages, Mic, Settings } from 'lucide-react'
 import WebcamView from '../components/sim/WebcamView.jsx'
 import PermissionGate from '../components/sim/PermissionGate.jsx'
 import TempleRail from '../components/sim/TempleRail.jsx'
@@ -11,10 +12,10 @@ import QaOverlay from '../components/sim/overlays/QaOverlay.jsx'
 import { getCurrentLocation, startVoiceCommand, translateImage } from '../lib/simApi.js'
 
 const FEATURE_LABEL = {
-  translate: '실시간 음성 번역',
+  translate: '음성 번역',
   image: '이미지 번역',
   map: '길찾기',
-  qa: 'AI에게 질문하기',
+  qa: 'AI 질문',
 }
 
 // 서버가 감지한 기능 이름 → 프론트 오버레이 key
@@ -28,12 +29,12 @@ const VOICE_FEATURES = new Set(['translate', 'map', 'qa'])
 
 // 안경 다리에 배치할 기능 — 좌: 번역·이미지 / 우: 길찾기·Q&A
 const LEFT_FEATURES = [
-  { key: 'translate', label: '실시간 음성 번역', icon: '💬' },
-  { key: 'image', label: '이미지 번역', icon: '🖼️' },
+  { key: 'translate', label: '음성 번역', icon: Languages },
+  { key: 'image', label: '이미지 번역', icon: ImageIcon },
 ]
 const RIGHT_FEATURES = [
-  { key: 'map', label: '길찾기', icon: '🧭' },
-  { key: 'qa', label: 'AI에게 질문하기', icon: '🎙️' },
+  { key: 'map', label: '길찾기', icon: Compass },
+  { key: 'qa', label: 'AI 질문', icon: Mic },
 ]
 
 export default function Simulation() {
@@ -51,7 +52,7 @@ export default function Simulation() {
   })
   const [cameras, setCameras] = useState([]) // 연결된 videoinput 장치 목록
   const [selectedCamera, setSelectedCamera] = useState('') // 선택된 deviceId ('' = 기본)
-  const [settingsOpen, setSettingsOpen] = useState(false) // 상단 ⚙ 설정 팝오버
+  const [settingsOpen, setSettingsOpen] = useState(false) // 상단 설정 팝오버
   const [permitted, setPermitted] = useState(false) // 권한 게이트 통과 여부
   const webcamRef = useRef(null)
 
@@ -371,13 +372,13 @@ export default function Simulation() {
               onClick={() => setSettingsOpen((v) => !v)}
               aria-label="설정"
               aria-expanded={settingsOpen}
-              className={`flex h-12 w-12 items-center justify-center rounded-full border text-2xl transition-all ${
+              className={`flex h-12 w-12 items-center justify-center rounded-full border transition-all ${
                 settingsOpen
                   ? 'border-sky bg-sky/15 text-sky-bright shadow-[0_0_18px_rgba(45,169,239,0.4)]'
                   : 'border-white/15 text-white/70 hover:border-white/30 hover:text-white'
               }`}
             >
-              ⚙
+              <Settings className="h-5 w-5" strokeWidth={1.75} />
             </button>
 
             {settingsOpen && (

@@ -1,3 +1,5 @@
+import { X } from 'lucide-react'
+
 // 이미지 번역 오버레이 (FR-IMG-*).
 // 캠은 뒤에서 계속 실시간으로 보이고, 번역 결과는 캠을 가리지 않는
 // 코너 PiP + 하단 칩으로 보여준다.
@@ -7,7 +9,7 @@
 //   pending       번역 요청 진행 중
 //   error         실패 사유(서버 msg) — 이때 PiP는 띄우지 않고 하단 칩에만 문구
 //   onRetry       "다시 촬영" — 현재 라이브 화면을 새로 찍어 번역
-//   onClose       PiP ✕ — 결과/프레임만 비우고 기능은 켜둔 채 라이브 캠만 남긴다
+//   onClose       PiP 닫기 — 결과/프레임만 비우고 기능은 켜둔 채 라이브 캠만 남긴다
 export default function ImageTranslateOverlay({
   frameDataUrl = null,
   result = null,
@@ -45,9 +47,9 @@ export default function ImageTranslateOverlay({
                 type="button"
                 onClick={onClose}
                 aria-label="번역 결과 닫기"
-                className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-navy-deep/70 text-sm text-white/70 transition-colors hover:text-white"
+                className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-navy-deep/70 text-white/70 transition-colors hover:text-white"
               >
-                ✕
+                <X className="h-3.5 w-3.5" strokeWidth={2} />
               </button>
             )}
           </div>
