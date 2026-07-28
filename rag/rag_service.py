@@ -14,7 +14,7 @@ from schemas import RagRequest, RagResponse
 os.environ["OPENAI_API_KEY"] = "ollama"
 
 # DB 접속 정보 세팅 (수정 완료)
-DB_USER = "dauser"
+DB_USER = "dbuser"
 DB_PASSWORD = "db1234!!"
 DB_HOST = "10.0.2.9"
 DB_PORT = "5432"
