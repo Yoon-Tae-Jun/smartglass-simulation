@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import WebcamView from '../components/sim/WebcamView.jsx'
+import PermissionGate from '../components/sim/PermissionGate.jsx'
 import TempleRail from '../components/sim/TempleRail.jsx'
 import SettingsPanel from '../components/sim/SettingsPanel.jsx'
 import TranslateOverlay from '../components/sim/overlays/TranslateOverlay.jsx'
@@ -44,13 +45,14 @@ export default function Simulation() {
   const [imageError, setImageError] = useState(null) // 이미지 번역 실패 msg
   const [settings, setSettings] = useState({
     region: '서울',
-    sourceLang: '일본어', // 상대 언어
+    sourceLang: '영어', // 상대 언어
     targetLang: '한국어', // 내 언어
     tts: true,
   })
   const [cameras, setCameras] = useState([]) // 연결된 videoinput 장치 목록
   const [selectedCamera, setSelectedCamera] = useState('') // 선택된 deviceId ('' = 기본)
   const [settingsOpen, setSettingsOpen] = useState(false) // 상단 ⚙ 설정 팝오버
+  const [permitted, setPermitted] = useState(false) // 권한 게이트 통과 여부
   const webcamRef = useRef(null)
 
   // 음성 명령 (WS /stt/ws) — 화면에 들어온 순간 세션을 열고 나갈 때까지 유지한다.
@@ -92,6 +94,7 @@ export default function Simulation() {
   // 상시 연결이어도 자막이나 기능이 멋대로 뜨지 않는다.
   // 위치는 목적지만 말한 길찾기의 출발지로 쓰이므로 접속 전에 한 번 받아둔다.
   useEffect(() => {
+    if (!permitted) return // 게이트 통과 전에는 음성·위치 초기화하지 않는다
     let cancelled = false
 
     ;(async () => {
@@ -116,7 +119,7 @@ export default function Simulation() {
     }
     // handleVoiceEvent는 상태 setter와 ref만 건드리므로 처음 값으로 계속 써도 안전하다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [permitted])
 
   // 버튼 토글 (FR-SYS-4): 같은 기능이면 off, 다르면 교체
   function handleToggle(key) {
@@ -300,25 +303,20 @@ export default function Simulation() {
     else pendingWakeRef.current = null
   }
 
-  // 헤더 마이크 토글: 호출어를 부르는 대신 눌러서 바로 명령을 말한다.
-  // 세션 자체는 계속 열려 있으므로 서버 상태(idle ↔ listening)만 오간다.
-  function toggleVoice() {
-    voiceFeatureRef.current = null // 어떤 기능이 올지 모르는 자유 라우팅
-    wakeByButtonRef.current = false
-    if (listening) {
-      requestSleep()
-      return
-    }
-    setVoiceCaption(null)
-    setCommandError(null)
-    requestWake()
-  }
-
   // 마지막 음성 명령이 지금 열려 있는 오버레이의 것일 때만 그 값을 넘긴다.
   // (버튼으로 연 오버레이에 다른 기능의 문장/에러가 새는 걸 막는다)
   const commandActive = command != null && FEATURE_KEY[command.feature] === activeFeature
   const commandText = commandActive ? command.text : null
   const activeError = commandActive ? commandError : null
+
+  // 권한 게이트: 세 권한을 다 받기 전에는 웹캠/음성/위치를 초기화하지 않는다
+  if (!permitted) {
+    return (
+      <div className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-navy-deep text-white">
+        <PermissionGate onReady={() => setPermitted(true)} />
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-navy-deep text-white">
@@ -350,23 +348,6 @@ export default function Simulation() {
         </Link>
 
         <div className="flex items-center gap-4">
-          <span className="eyebrow text-white/50">SIMULATION</span>
-
-          {/* 음성 명령 마이크 */}
-          <button
-            type="button"
-            onClick={toggleVoice}
-            aria-label="음성 명령"
-            aria-pressed={listening}
-            className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition-all ${
-              listening
-                ? 'border-sky bg-sky/15 text-sky-bright shadow-[0_0_18px_rgba(45,169,239,0.4)] glow-pulse'
-                : 'border-white/15 text-white/70 hover:border-white/30 hover:text-white'
-            }`}
-          >
-            🎙️
-          </button>
-
           {/* 설정 톱니 + 팝오버 */}
           <div className="relative">
             <button
@@ -374,7 +355,7 @@ export default function Simulation() {
               onClick={() => setSettingsOpen((v) => !v)}
               aria-label="설정"
               aria-expanded={settingsOpen}
-              className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition-all ${
+              className={`flex h-12 w-12 items-center justify-center rounded-full border text-2xl transition-all ${
                 settingsOpen
                   ? 'border-sky bg-sky/15 text-sky-bright shadow-[0_0_18px_rgba(45,169,239,0.4)]'
                   : 'border-white/15 text-white/70 hover:border-white/30 hover:text-white'
