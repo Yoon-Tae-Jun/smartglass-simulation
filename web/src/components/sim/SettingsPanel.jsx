@@ -1,16 +1,14 @@
-// 설정 / 상태 패널 (상단 톱바 ⚙ 버튼이 여는 팝오버 콘텐츠).
-// 현재 활성 기능 상태를 보여주고, 기능별 설정(번역 언어, TTS 등)을 조정한다.
+// 설정 패널 (상단 톱바 ⚙ 버튼이 여는 팝오버 콘텐츠).
+// 기능별 설정(여행 지역, 카메라, 번역 언어, TTS 등)을 조정한다.
 // 설정값은 아직 mock 파이프라인에 직접 연결되지 않았으나, 백엔드 연동 시
 // startTranslateStream / askQuestion 등에 전달할 자리다.
-const FEATURE_META = {
-  translate: '마이크 입력을 실시간 인식해 자막으로 번역합니다.',
-  image: '웹캠 프레임을 캡처해 이미지 속 텍스트를 번역합니다.',
-  map: '음성 목적지를 인식해 경로를 안내합니다.',
-  qa: '음성 질문을 인식해 답변을 음성·화면으로 출력합니다.',
-  null: '왼쪽에서 기능을 선택해 시작하세요.',
-}
-
-const LANGS = ['일본어', '영어', '중국어', '한국어']
+// 현재는 영어↔한국어만 지원. 나머지 언어는 개발 중(선택 불가).
+const LANGS = [
+  { name: '영어', ready: true },
+  { name: '한국어', ready: true },
+  { name: '일본어', ready: false },
+  { name: '중국어', ready: false },
+]
 
 // 현재는 서울만 지원. 나머지 도시는 확장 예정(선택 불가).
 const REGIONS = [
@@ -46,18 +44,6 @@ export default function SettingsPanel({
             ✕
           </button>
         )}
-      </div>
-
-      {/* 상태 */}
-      <div className="rounded-xl border border-white/10 bg-navy-deep/60 p-4">
-        <span className="eyebrow text-white/40">상태</span>
-        <p className="mt-2 flex items-center gap-2 text-sm font-medium text-white">
-          <span
-            className={`h-2 w-2 rounded-full ${active ? 'bg-sky shadow-[0_0_8px_rgba(45,169,239,0.9)]' : 'bg-white/25'}`}
-          />
-          {active ? '실행 중' : '대기 중'}
-        </p>
-        <p className="mt-2 text-xs leading-relaxed text-white/50">{FEATURE_META[active ?? 'null']}</p>
       </div>
 
       {/* 컨트롤 */}
@@ -111,7 +97,10 @@ export default function SettingsPanel({
               aria-label="상대 언어"
             >
               {LANGS.map((l) => (
-                <option key={l}>{l}</option>
+                <option key={l.name} value={l.name} disabled={!l.ready}>
+                  {l.name}
+                  {l.ready ? '' : ' (개발 중)'}
+                </option>
               ))}
             </select>
             <button
@@ -131,7 +120,10 @@ export default function SettingsPanel({
               aria-label="내 언어"
             >
               {LANGS.map((l) => (
-                <option key={l}>{l}</option>
+                <option key={l.name} value={l.name} disabled={!l.ready}>
+                  {l.name}
+                  {l.ready ? '' : ' (개발 중)'}
+                </option>
               ))}
             </select>
           </div>
