@@ -29,7 +29,7 @@ FRAME_TIMEOUT = 3.0  # capture 요청 후 카메라 프레임을 기다리는 �
   {"action": "frame", "image": "<base64>"} capture 요청에 대한 응답
 쿼리:
 - language: 인식 언어 (ko | en | ja)
-- origin: 현재 위치 (도로명 주소 또는 상호명), 길찾기 출발지로 사용
+- lat, lng: 현재 위치 좌표. 목적지만 말했을 때 길찾기 출발지로 사용된다
 - execute: true면 명령어 감지 시 기능(map 등)까지 실행해서 결과를 함께 보냄
 - wake_word: true면 호출어("헤이 글래스")를 들어야 명령을 받는다. false면 항상 듣는다
 - listen_timeout: 호출어 뒤 명령을 받는 시간(초). 0 이하면 무제한
@@ -45,7 +45,8 @@ FRAME_TIMEOUT = 3.0  # capture 요청 후 카메라 프레임을 기다리는 �
 async def stream(
     websocket: WebSocket,
     language: str = "ko",
-    origin: Optional[str] = None,
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
     execute: bool = True,
     wake_word: bool = True,
     listen_timeout: Optional[float] = None,
