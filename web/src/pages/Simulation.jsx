@@ -303,20 +303,6 @@ export default function Simulation() {
     else pendingWakeRef.current = null
   }
 
-  // 헤더 마이크 토글: 호출어를 부르는 대신 눌러서 바로 명령을 말한다.
-  // 세션 자체는 계속 열려 있으므로 서버 상태(idle ↔ listening)만 오간다.
-  function toggleVoice() {
-    voiceFeatureRef.current = null // 어떤 기능이 올지 모르는 자유 라우팅
-    wakeByButtonRef.current = false
-    if (listening) {
-      requestSleep()
-      return
-    }
-    setVoiceCaption(null)
-    setCommandError(null)
-    requestWake()
-  }
-
   // 마지막 음성 명령이 지금 열려 있는 오버레이의 것일 때만 그 값을 넘긴다.
   // (버튼으로 연 오버레이에 다른 기능의 문장/에러가 새는 걸 막는다)
   const commandActive = command != null && FEATURE_KEY[command.feature] === activeFeature
@@ -362,23 +348,6 @@ export default function Simulation() {
         </Link>
 
         <div className="flex items-center gap-4">
-          <span className="eyebrow text-white/50">SIMULATION</span>
-
-          {/* 음성 명령 마이크 */}
-          <button
-            type="button"
-            onClick={toggleVoice}
-            aria-label="음성 명령"
-            aria-pressed={listening}
-            className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition-all ${
-              listening
-                ? 'border-sky bg-sky/15 text-sky-bright shadow-[0_0_18px_rgba(45,169,239,0.4)] glow-pulse'
-                : 'border-white/15 text-white/70 hover:border-white/30 hover:text-white'
-            }`}
-          >
-            🎙️
-          </button>
-
           {/* 설정 톱니 + 팝오버 */}
           <div className="relative">
             <button
@@ -386,7 +355,7 @@ export default function Simulation() {
               onClick={() => setSettingsOpen((v) => !v)}
               aria-label="설정"
               aria-expanded={settingsOpen}
-              className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition-all ${
+              className={`flex h-12 w-12 items-center justify-center rounded-full border text-2xl transition-all ${
                 settingsOpen
                   ? 'border-sky bg-sky/15 text-sky-bright shadow-[0_0_18px_rgba(45,169,239,0.4)]'
                   : 'border-white/15 text-white/70 hover:border-white/30 hover:text-white'
