@@ -7,9 +7,9 @@ from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_postgres.vectorstores import PGVector
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from schemas import RagRequest, RagResponse
+from langchain_classic.chains import create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from rag.rag_schemas import RagRequest, RagResponse
 
 # 1. .env 파일에 숨겨둔 정보들을 파이썬이 읽어오도록 실행합니다.
 load_dotenv()
@@ -32,7 +32,7 @@ COLLECTION_NAME = "seoul_travel_docs"
 llm = ChatOpenAI(
     model="qwen2.5",
     temperature=0,
-    openai_api_base="http://10.0.2.6:11434/v1"
+    openai_api_base="http://127.0.0.1:11434/v1"
 )
 
 
