@@ -62,6 +62,7 @@ export default function Simulation() {
   const [command, setCommand] = useState(null) // 마지막 음성 명령 { text, feature }
   const [commandError, setCommandError] = useState(null) // 기능 실행 실패 msg (501 등)
   const [voiceDirections, setVoiceDirections] = useState(null) // 음성 navigate 결과
+  const [qaResult, setQaResult] = useState(null) // 음성 qa 결과 { answer, sources }
   const [dialogLine, setDialogLine] = useState(null) // { text, translated, final } | null
   const voiceCtrl = useRef(null)
   const commandRef = useRef(null) // 콜백 클로저에서 최신 명령을 참조
@@ -265,6 +266,7 @@ export default function Simulation() {
       rememberCommand(evt)
       setCommandError(null)
       setVoiceDirections(null)
+      setQaResult(null)
       if (evt.feature === 'image') {
         setImageResult(null)
         setImageError(null)
@@ -286,6 +288,10 @@ export default function Simulation() {
         setImageError(null)
         setImageResult(evt.data)
         setActiveFeature('image')
+      } else if (evt.feature === 'qa' && evt.data) {
+        // 서버가 RAG 서버까지 호출한 결과 { answer, sources }
+        setQaResult(evt.data)
+        setActiveFeature('qa')
       }
     } else if (evt.kind === 'error') {
       // 연결·마이크 문제(0/403)는 자막에, 그 외는 실행 중인 기능의 실패로 본다
@@ -438,7 +444,9 @@ export default function Simulation() {
             {activeFeature === 'map' && (
               <MapOverlay directions={voiceDirections} request={commandText} error={activeError} />
             )}
-            {activeFeature === 'qa' && <QaOverlay question={commandText} error={activeError} />}
+            {activeFeature === 'qa' && (
+              <QaOverlay question={commandText} error={activeError} result={qaResult} />
+            )}
 
             {/* 음성 인식 라이브 자막 (dialog 모드는 번역 오버레이가 대신 표시).
                 호출어 대기(idle) 중에는 띄우지 않되, 연결·마이크 실패는 그때도 알려준다 */}
