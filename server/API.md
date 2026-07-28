@@ -15,7 +15,7 @@
 ## 목차
 - [공통 응답 포맷](#공통-응답-포맷)
 - [1. 음성 명령 — WebSocket `/stt/ws`](#1-음성-명령--websocket-sttws)
-  - [1-1. command 모드 (한국어 명령)](#1-1-command-모드-한국어-명령)
+  - [1-1. listening 상태 (한국어 명령)](#1-1-listening-상태-한국어-명령)
   - [1-2. dialog 모드 (외국인 대화 번역)](#1-2-dialog-모드-외국인-대화-번역)
 - [2. 지도 REST](#2-지도-rest)
 - [3. 이미지 번역 REST](#3-이미지-번역-rest)
@@ -68,9 +68,11 @@ ws://localhost:8000/stt/ws?language=ko&lat=37.5666103&lng=126.9783882
 
 | 이름 | 기본값 | 설명 |
 |---|---|---|
-| `language` | `ko` | command 모드의 인식 언어 (`ko` / `en` / `ja`) |
+| `language` | `ko` | 명령 인식 언어 (`ko` / `en` / `ja`) |
 | `lat`, `lng` | 없음 | 현재 위치 좌표 (위도, 경도). 둘 다 있어야 인정된다 |
 | `execute` | `true` | `false`면 인식만 하고 기능은 실행하지 않는다 |
+| `wake_word` | `true` | 호출어("헤이 글래스")를 들어야 명령을 받는다. `false`면 항상 듣는다 |
+| `listen_timeout` | `.env`의 `STT_LISTEN_TIMEOUT` (없으면 `10`) | 호출어 뒤 명령을 받는 시간(초). 0 이하면 무제한 |
 
 ### 보내는 것
 
@@ -79,6 +81,14 @@ ws://localhost:8000/stt/ws?language=ko&lat=37.5666103&lng=126.9783882
 | 바이너리 프레임 | 16kHz · 모노 · 16bit PCM 오디오 청크 |
 | 텍스트 프레임 | `{"action": "stop"}` — 종료 요청 |
 | 텍스트 프레임 | `{"action": "frame", "image": "<base64>"}` — `capture` 요청에 대한 응답 |
+| 텍스트 프레임 | `{"action": "wake"}` — 호출어를 건너뛰고 바로 명령 수신 상태로 (기능 버튼 클릭 등) |
+| 텍스트 프레임 | `{"action": "wake", "mode": "dialog"}` — 대화 번역 모드로 바로 진입 |
+| 텍스트 프레임 | `{"action": "sleep"}` — 호출어 대기 상태로 복귀 |
+
+소켓은 **화면에 들어온 순간 한 번 열고 나갈 때까지 유지**하면 된다. 호출어를 듣기 전까지
+서버는 아무 이벤트도 보내지 않으므로, 상시 연결이어도 자막이 멋대로 뜨지 않는다.
+버튼 클릭처럼 "이미 부른 것과 같다"고 볼 수 있을 때는 `wake`로 상태만 바꾸면 되고,
+소켓을 다시 열 필요는 없다.
 
 #### 카메라 프레임 (`capture` ⇄ `frame`)
 
@@ -104,20 +114,39 @@ if (d.type === 'capture') {
   `400 카메라 화면을 받지 못했습니다`가 돌아온다
 - 형식/크기 제한은 [이미지 번역 REST](#3-이미지-번역-rest)와 같다 (JPG·PNG 등, 1960×1960px 이내)
 
-### 두 가지 모드
+### 세 가지 상태
 
-소켓 하나가 두 모드를 오간다. **모드가 바뀌면 서버가 `status` 이벤트로 알려준다.**
+소켓 하나가 세 상태를 오간다. **상태가 바뀌면 서버가 `status` 이벤트로 알려주고,
+현재 상태는 모든 이벤트의 `data.mode`에 실려 온다.**
 
-| 모드 | 하는 일 | 인식 언어 |
+| 상태 | 하는 일 | 인식 언어 |
 |---|---|---|
-| `command` (기본) | 한국어 명령어 감지 → 기능 실행 | 쿼리 `language` (기본 `ko`) |
-| `dialog` | 상대(외국인) 말을 인식해 한국어 번역을 함께 반환 | `en` 고정 → `ko` 번역 |
+| `idle` (기본) | 호출어만 기다린다. **이벤트를 하나도 보내지 않는다** | 쿼리 `language` (기본 `ko`) |
+| `listening` | 명령어를 기다린다. **명령 하나를 잡으면 곧바로 `idle`로 돌아간다.** 말이 없으면 `listen_timeout` 뒤 `idle`로 | 쿼리 `language` |
+| `dialog` | 상대(외국인) 말을 인식해 한국어 번역을 함께 반환. 타임아웃 없음 | `en` 고정 → `ko` 번역 |
 
 ```
-연결 → command
-  "외국인이랑 대화 번역해줘"  → status:"dialog"  → dialog 모드
-  "stop" 또는 "exit"          → status:"command" → command 모드
+연결 → idle
+  "헤이 글래스"                → mode:"listening"  (또는 클라이언트가 {"action":"wake"})
+  "경복궁까지 안내해줘"         → wake feature=navigate
+                              → mode:"idle"       (명령을 잡는 즉시 대기로 복귀)
+                              → 기능 실행 결과      (대기로 돌아간 뒤에 도착한다)
+  (명령을 못 잡으면 계속 listening, listen_timeout 초과 시 idle)
+  "고마워"                     → mode:"idle"       (또는 {"action":"sleep"})
+
+listening
+  "외국인이랑 대화 번역해줘"     → mode:"dialog"    (또는 {"action":"wake","mode":"dialog"})
+dialog
+  "stop" 또는 "exit"           → mode:"idle"
 ```
+
+> **명령은 한 번에 하나다.** `wake` 이벤트가 나가면 서버는 바로 `idle`로 돌아가므로,
+> 다음 명령을 하려면 호출어를 다시 부르거나 `{"action":"wake"}`를 보내야 한다.
+> 기능 실행(길찾기·이미지 번역)은 별도 스레드에서 계속되므로 **실행 결과와 `capture` 요청은
+> `idle`로 돌아간 뒤에 도착한다.** `idle`이 왔다고 진행 중인 요청을 취소하면 안 된다.
+
+`idle`에서는 자막(`partial`/`final`)도 나가지 않는다. 호출어를 한 문장에 이어 말한 경우
+("헤이 글래스, 환율 알려줘")는 호출어 뒷부분만 명령으로 처리된다.
 
 ### 받는 것 (공통)
 
@@ -129,15 +158,18 @@ if (d.type === 'capture') {
 | `partial` | 말하는 동안 계속 갱신 | `text`, (dialog) `translated` | 자막 갱신 |
 | `final` | 침묵 감지로 문장 확정 | `text`, (dialog) `translated` | 자막 확정 |
 | `wake` | 확정 문장에서 기능이 잡혔을 때 | `text`, `feature` | 해당 오버레이 켜기 |
-| `status` | 모드가 바뀌었을 때 | `text` = `"dialog"` \| `"command"` | 번역 UI 토글 |
+| `status` | 상태가 바뀌었을 때 | `mode` = `"idle"` \| `"listening"` \| `"dialog"`, `text` = 안내문 | 상태 UI 갱신 |
 | `capture` | 이미지 번역에 화면이 필요할 때 | — | **즉시 `frame` 응답** |
 | (없음) | 기능 실행 결과 | `feature`, `text`, `data` | 결과 렌더 |
 
-이벤트 객체는 항상 `type` / `text` / `feature` / `translated` 4개 키를 가진다. 해당 없는 값은 `null`로 온다.
+이벤트 객체는 항상 `type` / `text` / `feature` / `translated` / `mode` 5개 키를 가진다. 해당 없는 값은 `null`로 온다.
+
+> `status`의 상태는 **`mode`로 판별한다.** `text`에는 `"네, 듣고 있어요"`처럼 화면에
+> 그대로 띄울 수 있는 안내문이 들어오므로 분기 조건으로 쓰면 안 된다.
 
 ---
 
-### 1-1. command 모드 (한국어 명령)
+### 1-1. listening 상태 (한국어 명령)
 
 #### 길찾기 출발지 규칙
 
@@ -152,17 +184,25 @@ if (d.type === 'capture') {
 #### 메시지 예시
 
 ```jsonc
+// ⓘ 호출어를 들었을 때 — 여기서부터 자막이 나간다 (그전 idle 상태에서는 아무것도 오지 않는다)
+{ "status": 200, "msg": "success",
+  "data": { "type": "status", "text": "네, 듣고 있어요", "feature": null,
+            "translated": null, "mode": "listening" } }
+
 // ① 중간 자막 — 말하는 동안 계속 갱신된다
 { "status": 200, "msg": "success",
-  "data": { "type": "partial", "text": "경복궁까지", "feature": null, "translated": null } }
+  "data": { "type": "partial", "text": "경복궁까지", "feature": null,
+            "translated": null, "mode": "listening" } }
 
 // ② 확정 문장 — 침묵이 감지되면 확정된다
 { "status": 200, "msg": "success",
-  "data": { "type": "final", "text": "경복궁까지 가는 길 알려줘", "feature": null, "translated": null } }
+  "data": { "type": "final", "text": "경복궁까지 가는 길 알려줘", "feature": null,
+            "translated": null, "mode": "listening" } }
 
 // ③ 명령어 감지 — 확정 문장에서 기능이 잡혔을 때만 온다
 { "status": 200, "msg": "success",
-  "data": { "type": "wake", "text": "경복궁까지 가는 길 알려줘", "feature": "navigate", "translated": null } }
+  "data": { "type": "wake", "text": "경복궁까지 가는 길 알려줘", "feature": "navigate",
+            "translated": null, "mode": "listening" } }
 
 // ④ 기능 실행 결과 — 서버가 지도 API까지 호출한 결과 (execute=true일 때)
 { "status": 200, "msg": "success",
@@ -180,17 +220,21 @@ if (d.type === 'capture') {
 
 #### 처리 순서 예시
 
-`lat=37.5666103&lng=126.9783882`(서울시청)로 연결하고 "경복궁까지 가는 길 알려줘"라고 말한 경우:
+`lat=37.5666103&lng=126.9783882`(서울시청)로 연결하고 "헤이 글래스" → "경복궁까지 가는 길 알려줘"라고 말한 경우:
 
 ```
-(오디오 전송)
+(오디오 전송 — 호출어를 듣기 전까지는 아무 이벤트도 오지 않는다)
+  → status  mode=listening ("네, 듣고 있어요")
   → partial "경복궁까지"
   → partial "경복궁까지 가는 길 알려줘"
   → final   "경복궁까지 가는 길 알려줘"
   → wake    feature=navigate
+  → status  mode=idle ("명령을 실행합니다. 다시 부르시면 들을게요")
        (서버 내부: 좌표 → "서울특별시 중구 세종대로 110" 역변환 → 경로 조회)
   → 실행 결과 (거리 2,244m / 예상 택시비 5,900원)
 ```
+
+이미지 번역도 같다. `wake` → `status mode=idle` → `capture` → (`frame` 응답) → 실행 결과 순으로 온다.
 
 `{"action":"stop"}`을 보낸 뒤에도 실행 중인 기능 결과가 있으면 그것까지 보내고 소켓이 닫힌다(최대 10초 대기).
 
@@ -222,50 +266,57 @@ CLOVA Speech의 번역 옵션을 그대로 쓰므로 별도 API 호출이 없다
 
 #### 진입
 
-command 모드의 **확정 문장(`final`)** 에 아래 단어가 하나라도 들어가면 자동 전환된다 (공백은 무시하고 비교).
+두 가지 경로가 있다.
 
-```
-번역 · 통역 · 외국인 · 외국어
-```
+1. **말로**: `listening` 상태의 **확정 문장(`final`)** 에 아래 단어가 하나라도 들어가면 자동 전환된다 (공백은 무시하고 비교).
 
-예: "번역해줘", "통역 켜줘", "외국인이랑 대화 번역해줘" — 전부 dialog 진입.
+   ```
+   번역 · 통역 · 외국인 · 외국어
+   ```
 
-> 이 판정이 명령어 감지보다 **먼저** 실행된다. 번역/통역은 `wake` 이벤트로 나가지 않으므로
+   예: "번역해줘", "통역 켜줘", "외국인이랑 대화 번역해줘" — 전부 dialog 진입.
+
+2. **화면에서**: 번역 버튼을 눌렀을 때처럼 `{"action": "wake", "mode": "dialog"}`를 보내면
+   호출어도 명령도 기다리지 않고 곧바로 진입한다.
+
+> 말로 진입하는 판정은 명령어 감지보다 **먼저** 실행된다. 번역/통역은 `wake` 이벤트로 나가지 않으므로
 > 클라이언트는 `feature: "translate"`를 받을 일이 없다. 실시간 번역 UI는 `status` 이벤트로만 켠다.
 
 #### 종료
 
-dialog 모드의 확정 문장에 `stop` 또는 `exit`가 포함되면 command 모드로 돌아온다(대소문자 무시).
-소켓은 끊지 않는다.
+dialog 모드의 확정 문장에 `stop` 또는 `exit`가 포함되면 호출어 대기 상태로 돌아온다(대소문자 무시).
+`{"action": "sleep"}`으로도 같다. 소켓은 끊지 않는다.
 
 #### 메시지 예시
 
 ```jsonc
-// ① 모드 진입 알림
+// ① 모드 진입 알림 (상태는 text가 아니라 mode로 판별한다)
 { "status": 200, "msg": "success",
-  "data": { "type": "status", "text": "dialog", "feature": null, "translated": null } }
+  "data": { "type": "status", "text": "대화 번역 모드로 전환합니다. 영어로 말씀해 주세요",
+            "feature": null, "translated": null, "mode": "dialog" } }
 
 // ② 상대가 말하는 동안 (원문 + 번역이 같이 갱신된다)
 { "status": 200, "msg": "success",
   "data": { "type": "partial", "text": "Where is the", "feature": null,
-            "translated": "어디에 있나요" } }
+            "translated": "어디에 있나요", "mode": "dialog" } }
 
 // ③ 확정 문장
 { "status": 200, "msg": "success",
   "data": { "type": "final", "text": "Where is the subway station?", "feature": null,
-            "translated": "지하철역이 어디에 있나요?" } }
+            "translated": "지하철역이 어디에 있나요?", "mode": "dialog" } }
 
-// ④ 모드 복귀 알림 ("stop" 이라고 말했을 때)
+// ④ 복귀 알림 ("stop" 이라고 말했을 때)
 { "status": 200, "msg": "success",
-  "data": { "type": "status", "text": "command", "feature": null, "translated": null } }
+  "data": { "type": "status", "text": "대화 번역을 종료합니다",
+            "feature": null, "translated": null, "mode": "idle" } }
 ```
 
 #### 주의
 
 - dialog 모드에서는 **`wake` 이벤트도, 기능 실행 결과도 오지 않는다.** 자막(`partial`/`final`)만 온다.
-- 인식 언어는 `en`, 번역 대상은 `ko`로 **서버에 고정**되어 있다. 쿼리 `language`는 command 모드에만 적용된다.
+- 인식 언어는 `en`, 번역 대상은 `ko`로 **서버에 고정**되어 있다. 쿼리 `language`는 `listening` 상태에만 적용된다.
 - 모드 전환 시 기존 STT 세션을 닫고 새로 여는 구조라, 전환 직후 잠깐은 인식 이벤트가 오지 않는다. 이때 들어온 오디오는 버려진다.
-- `translated`는 dialog 모드에서만 채워진다. command 모드에서는 항상 `null`.
+- `translated`는 dialog 모드에서만 채워진다. `listening` 상태에서는 항상 `null`.
 
 ---
 
@@ -279,7 +330,7 @@ const { latitude: lat, longitude: lng } = pos.coords;
 const ws = new WebSocket(`ws://localhost:8000/stt/ws?language=ko&lat=${lat}&lng=${lng}`);
 ws.binaryType = "arraybuffer";
 
-let mode = "command";
+let mode = "idle";   // 호출어를 듣기 전까지는 아무 이벤트도 오지 않는다
 
 ws.onmessage = (ev) => {
   const res = JSON.parse(ev.data);
@@ -288,8 +339,9 @@ ws.onmessage = (ev) => {
   const d = res.data;
   if (d.type === "capture") {                   // 지금 화면을 찍어 보내라는 요청
     ws.send(JSON.stringify({ action: "frame", image: webcam.capture() }));
-  } else if (d.type === "status") {             // 모드 전환 (dialog | command)
-    mode = d.text;
+  } else if (d.type === "status") {             // 상태 전환 (idle | listening | dialog)
+    mode = d.mode;                              // d.text는 화면에 띄울 안내문
+    showStatus(d.text);
     toggleTranslateOverlay(mode === "dialog");
   } else if (d.type === "partial" || d.type === "final") {
     const fixed = d.type === "final";
@@ -317,7 +369,19 @@ ws.onopen = async () => {
   };
 };
 
-// 종료
+// 기능 버튼: 호출어를 건너뛰고 바로 명령 수신 상태로 (번역 버튼은 dialog로 직행)
+function onFeatureButton(feature) {
+  ws.send(JSON.stringify(
+    feature === "translate" ? { action: "wake", mode: "dialog" } : { action: "wake" },
+  ));
+}
+
+// 기능을 끌 때: 타임아웃을 기다리지 않고 호출어 대기로 되돌린다
+function onFeatureOff() {
+  ws.send(JSON.stringify({ action: "sleep" }));
+}
+
+// 종료 (화면을 벗어날 때)
 function stop() {
   ws.send(JSON.stringify({ action: "stop" }));
 }

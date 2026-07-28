@@ -33,7 +33,16 @@ python -m grpc_tools.protoc --proto_path=. --python_out=. --grpc_python_out=. ne
   - `language`: `ko`(기본) / `en` / `ja`
   - `lat`, `lng`: 현재 위치 좌표 — 목적지만 말했을 때 길찾기 출발지로 사용
   - `execute`: `true`(기본)면 명령어 감지 시 기능(map 등)까지 실행해서 결과도 보냄
-- 입력: 바이너리 프레임 = 16kHz·모노·16bit PCM 오디오 청크, 종료는 `{"action":"stop"}`
+  - `wake_word`: `true`(기본)면 호출어("헤이 글래스")를 들어야 명령을 받는다
+  - `listen_timeout`: 호출어 뒤 명령을 받는 시간(초). 0 이하면 무제한
+- 입력: 바이너리 프레임 = 16kHz·모노·16bit PCM 오디오 청크
+  - `{"action":"stop"}` 종료
+  - `{"action":"wake"}` 호출어 없이 바로 명령 수신 상태로 (기능 버튼 클릭 등),
+    `{"action":"wake","mode":"dialog"}`면 대화 번역 모드로 직행
+  - `{"action":"sleep"}` 호출어 대기 상태로 복귀
+- 소켓은 화면 진입 시 한 번 열고 유지한다. 호출어 대기(`idle`) 중에는 이벤트를 보내지 않는다
+- **명령은 한 번에 하나다.** `wake` 이벤트가 나가면 곧바로 `idle`로 돌아가므로 다음 명령은
+  호출어를 다시 불러야 한다. 기능 실행은 별도 스레드라 결과·`capture`는 그 뒤에 도착한다
 - 출력: 모두 공통 포맷 [`BaseResponse`](../../schemas/base.py)로 감싼 JSON
 
 ```jsonc
@@ -57,9 +66,11 @@ python -m grpc_tools.protoc --proto_path=. --python_out=. --grpc_python_out=. ne
 
 별도 엔드포인트 없이 위의 `/stt/ws` 소켓 안에서 모드만 바꾼다.
 
-- 진입: 확정 문장에 `번역`/`통역`/`외국인`/`외국어` 중 하나가 있으면 자동 전환 (`is_dialog_start()`)
-- 종료: dialog 모드 확정 문장에 `stop` 또는 `exit`가 있으면 command 모드로 복귀
-- 전환 시 서버가 `{"type":"status","text":"dialog"|"command"}` 이벤트를 보낸다
+- 진입: 확정 문장에 `번역`/`통역`/`외국인`/`외국어` 중 하나가 있으면 자동 전환 (`is_dialog_start()`).
+  화면에서 번역 버튼을 누른 경우엔 `{"action":"wake","mode":"dialog"}`로 곧장 진입
+- 종료: dialog 모드 확정 문장에 `stop` 또는 `exit`가 있으면 호출어 대기 상태로 복귀
+- 전환 시 서버가 `{"type":"status","mode":"idle"|"listening"|"dialog","text":"<안내문>"}`을 보낸다.
+  **상태 판별은 `mode`로 한다** — `text`는 화면에 띄울 안내문이다
 - 인식은 `en`, 번역은 `ko` 고정 — CLOVA 스트림의 번역 옵션을 쓰므로 별도 API 호출이 없다
 - 자막 이벤트에 `translated`(한국어 번역)가 함께 실린다
 

@@ -22,7 +22,7 @@ const FEATURE_KEY = { navigate: 'map', translate: 'translate', qa: 'qa', image: 
 // 설정의 언어 이름 → 파파고 언어 코드 (이미지 번역 target)
 const LANG_CODE = { 한국어: 'ko', 영어: 'en', 일본어: 'ja', 중국어: 'zh-CN' }
 
-// 버튼을 누르면 음성인식을 자동으로 켜는 기능들 (이미지 번역은 음성 없음)
+// 버튼을 누르면 호출어 없이 바로 명령 수신 상태로 들어가는 기능들 (이미지 번역은 음성 없음)
 const VOICE_FEATURES = new Set(['translate', 'map', 'qa'])
 
 // 안경 다리에 배치할 기능 — 좌: 번역·이미지 / 우: 길찾기·Q&A
@@ -53,22 +53,27 @@ export default function Simulation() {
   const [settingsOpen, setSettingsOpen] = useState(false) // 상단 ⚙ 설정 팝오버
   const webcamRef = useRef(null)
 
-  // 음성 명령 (WS /stt/ws)
-  const [listening, setListening] = useState(false)
+  // 음성 명령 (WS /stt/ws) — 화면에 들어온 순간 세션을 열고 나갈 때까지 유지한다.
+  // 상태는 서버가 status 이벤트로 알려주는 값만 믿는다 (프론트가 따로 추측하지 않는다).
+  const [voiceMode, setVoiceMode] = useState('idle') // idle(호출어 대기) | listening | dialog
   const [voiceCaption, setVoiceCaption] = useState(null) // { text, final } | { error }
   const [command, setCommand] = useState(null) // 마지막 음성 명령 { text, feature }
   const [commandError, setCommandError] = useState(null) // 기능 실행 실패 msg (501 등)
   const [voiceDirections, setVoiceDirections] = useState(null) // 음성 navigate 결과
-  const [dialogActive, setDialogActive] = useState(false) // dialog(실시간 음성 번역) 모드 여부
   const [dialogLine, setDialogLine] = useState(null) // { text, translated, final } | null
   const voiceCtrl = useRef(null)
   const commandRef = useRef(null) // 콜백 클로저에서 최신 명령을 참조
-  const dialogRef = useRef(false) // 콜백 클로저에서 최신 dialog 모드 여부를 참조
-  const voiceFeatureRef = useRef(null) // 음성 세션이 묶인 기능(null=헤더 마이크, 서버 자유 라우팅)
-  const sessionId = useRef(0) // 위치 조회를 기다리는 사이 취소됐는지 판별
+  const voiceModeRef = useRef('idle') // 콜백 클로저에서 최신 세션 상태를 참조
+  const voiceFeatureRef = useRef(null) // 음성 세션이 묶인 기능(null=호출어 경로, 서버 자유 라우팅)
+  const wakeByButtonRef = useRef(false) // 이번 listening 진입이 기능 버튼 때문인지
+  const pendingWakeRef = useRef(null) // 소켓이 열리기 전에 누른 기능 버튼 { mode }
   const imageSession = useRef(0) // 번역 응답이 도착했을 때 아직 유효한 요청인지 판별
   const imagePendingRef = useRef(false) // 콜백 클로저에서 최신 진행 여부를 참조
   const settingsRef = useRef(settings) // 음성 콜백 클로저에서 최신 설정을 참조
+
+  // idle은 "호출어를 기다리는 중"이라 사용자 입장에선 인식이 꺼진 것과 같다
+  const listening = voiceMode !== 'idle'
+  const dialogActive = voiceMode === 'dialog'
 
   useEffect(() => {
     settingsRef.current = settings
@@ -82,14 +87,36 @@ export default function Simulation() {
     return () => window.removeEventListener('keydown', onKey)
   }, [settingsOpen])
 
-  // 언마운트 시 음성 세션 정리
-  useEffect(
-    () => () => {
-      sessionId.current += 1
+  // 화면에 들어오는 즉시 음성 세션을 열고, 나갈 때까지 계속 듣는다.
+  // 서버는 호출어("헤이 글래스")를 듣기 전까지 idle 상태로 아무것도 내려보내지 않으므로,
+  // 상시 연결이어도 자막이나 기능이 멋대로 뜨지 않는다.
+  // 위치는 목적지만 말한 길찾기의 출발지로 쓰이므로 접속 전에 한 번 받아둔다.
+  useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      const location = await getCurrentLocation()
+      if (cancelled) return // 위치를 기다리는 사이 화면을 벗어난 경우
+      // 좌표를 못 받아도 인식은 진행한다 ("○○에서 △△까지"처럼 출발지를 말하면 됨)
+      voiceCtrl.current = startVoiceCommand({
+        location,
+        language: 'ko',
+        onEvent: handleVoiceEvent,
+      })
+      // 위치를 기다리는 사이에 기능 버튼을 눌렀다면 이제 반영한다
+      const pending = pendingWakeRef.current
+      pendingWakeRef.current = null
+      if (pending) voiceCtrl.current.wake(pending.mode)
+    })()
+
+    return () => {
+      cancelled = true
       voiceCtrl.current?.stop()
-    },
-    [],
-  )
+      voiceCtrl.current = null
+    }
+    // handleVoiceEvent는 상태 setter와 ref만 건드리므로 처음 값으로 계속 써도 안전하다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 버튼 토글 (FR-SYS-4): 같은 기능이면 off, 다르면 교체
   function handleToggle(key) {
@@ -107,12 +134,21 @@ export default function Simulation() {
       setImageError(null)
     }
 
-    // 인식 기능이면 그 기능에 고정된 음성 세션 시작, 아니면(이미지/off) 진행 중이던 인식 정지.
-    // startVoice가 기존 세션을 먼저 정리하므로 "다른 인식은 꺼진다".
+    // 인식 기능이면 호출어를 건너뛰고 바로 명령 수신 상태로, 아니면(이미지/off) 호출어 대기로.
+    // 세션은 화면 진입 때 열어둔 하나를 계속 쓰므로 재접속이 없다.
     if (next && VOICE_FEATURES.has(next)) {
-      startVoice(next)
+      voiceFeatureRef.current = next // 그 기능에 고정 (다른 기능이 감지돼도 오버레이를 안 바꾼다)
+      wakeByButtonRef.current = true // 뒤따라 올 listening 상태에서 이 고정을 유지한다
+      setVoiceDirections(null)
+      setCommandError(null)
+      setCommand(null)
+      commandRef.current = null
+      setVoiceCaption(null)
+      // 번역 버튼은 명령을 기다리지 않고 곧장 대화 번역(영어→한국어)으로 들어간다
+      requestWake(next === 'translate' ? 'dialog' : undefined)
     } else {
-      stopVoice()
+      voiceFeatureRef.current = null
+      requestSleep()
     }
   }
 
@@ -160,26 +196,36 @@ export default function Simulation() {
     const lock = voiceFeatureRef.current
     if (evt.kind === 'partial' || evt.kind === 'final') {
       // dialog(실시간 음성 번역) 모드에선 원문+번역을 번역 오버레이로 보낸다
-      if (dialogRef.current) {
+      if (voiceModeRef.current === 'dialog') {
         setDialogLine({ text: evt.text, translated: evt.translated, final: evt.kind === 'final' })
       } else {
         setVoiceCaption({ text: evt.text, final: evt.kind === 'final' })
       }
     } else if (evt.kind === 'status') {
-      // 고정 세션은 dialog/command 모드를 프론트가 소유하므로 서버 전환은 무시한다
-      if (lock) return
-      // 서버 모드 전환: dialog 진입 → 번역 오버레이, command 복귀 → 초기화
-      if (evt.text === 'dialog') {
-        dialogRef.current = true
-        setDialogActive(true)
-        setDialogLine(null)
+      // 서버가 알려주는 세션 상태 전환 (idle=호출어 대기 / listening=명령 수신 / dialog=대화 번역).
+      // evt.text에는 "네, 듣고 있어요" 같은 안내문이 들어온다.
+      const next = evt.mode ?? 'idle'
+      voiceModeRef.current = next
+      setVoiceMode(next)
+      setDialogLine(null)
+      if (next === 'idle') {
+        // 명령 하나를 실행하면 서버가 곧바로 여기로 돌아온다. 기능 고정은 아직 풀지 않는다
+        // — 실행 결과가 뒤따라 오므로, 그때까지는 그 기능의 것만 받아야 한다.
         setVoiceCaption(null)
-        setCommandError(null)
-        setActiveFeature('translate')
-      } else if (evt.text === 'command') {
-        dialogRef.current = false
-        setDialogActive(false)
-        setDialogLine(null)
+      } else {
+        setVoiceCaption({ text: evt.text })
+        if (next === 'listening') {
+          // 호출어로 들어왔다면 이전에 눌러둔 기능 고정을 푼다 (버튼으로 들어온 경우만 유지).
+          // 안 그러면 지난번 버튼의 기능이 다음 명령까지 계속 걸러낸다.
+          if (!wakeByButtonRef.current) voiceFeatureRef.current = null
+          wakeByButtonRef.current = false
+        } else if (next === 'dialog') {
+          // 말로 대화 번역에 들어온 경우에도 번역 오버레이를 띄운다
+          wakeByButtonRef.current = false
+          voiceFeatureRef.current = 'translate'
+          setCommandError(null)
+          setActiveFeature('translate')
+        }
       }
     } else if (evt.kind === 'capture') {
       // 서버가 "지금 이 순간의 화면"을 요청했다 (이미지 번역). 3초 안에 답해야 한다.
@@ -241,66 +287,31 @@ export default function Simulation() {
     }
   }
 
-  // 진행 중인 음성 세션 정지 + 관련 상태 초기화
-  function stopVoice() {
-    sessionId.current += 1 // 위치 대기 중인 시작 요청 무효화
-    voiceCtrl.current?.stop()
-    voiceCtrl.current = null
-    voiceFeatureRef.current = null
-    dialogRef.current = false
-    setDialogActive(false)
-    setDialogLine(null)
-    setListening(false)
+  // 호출어를 건너뛰고 바로 명령 수신 상태로. 세션이 아직 열리는 중이면(위치 조회 대기)
+  // 눌린 사실을 기억해 두고 열린 직후에 보낸다 — 그냥 흘리면 버튼이 먹은 것처럼 보인다.
+  function requestWake(mode) {
+    if (voiceCtrl.current) voiceCtrl.current.wake(mode)
+    else pendingWakeRef.current = { mode }
   }
 
-  // 음성 세션 시작. feature=null이면 헤더 마이크(서버 자유 라우팅),
-  // 아니면 그 기능에 고정된 세션. 기존 세션은 먼저 정리해 "다른 인식"을 끈다.
-  // 길찾기는 시작 전 GPS 좌표를 받아 넘긴다 — 목적지만 말했을 때 서버가 출발지로 쓴다.
-  async function startVoice(feature) {
-    voiceCtrl.current?.stop() // 실행 중이던 다른 세션 정리
-    voiceCtrl.current = null
-
-    const session = (sessionId.current += 1)
-    voiceFeatureRef.current = feature
-    setVoiceDirections(null)
-    setCommandError(null)
-    setCommand(null)
-    commandRef.current = null
-
-    // 번역은 처음부터 dialog 레이아웃으로, 그 외는 command 모드
-    const isDialog = feature === 'translate'
-    dialogRef.current = isDialog
-    setDialogActive(isDialog)
-    setDialogLine(null)
-    setListening(true)
-
-    // GPS는 길찾기와 헤더 마이크(어떤 기능이 올지 모름)에만 필요
-    let location = null
-    if (feature === 'map' || feature === null) {
-      setVoiceCaption({ text: '현재 위치 확인 중…' })
-      location = await getCurrentLocation()
-      if (session !== sessionId.current) return // 대기 중 껐거나 다른 기능으로 전환됨
-      // 좌표를 못 받아도 인식은 진행한다 ("○○에서 △△까지" 처럼 출발지를 말하면 됨)
-      setVoiceCaption(
-        location ? null : { error: '위치 권한이 없어 출발지를 함께 말해야 길찾기가 됩니다' },
-      )
-    } else {
-      setVoiceCaption(null)
-    }
-
-    voiceCtrl.current = startVoiceCommand({
-      location,
-      language: 'ko',
-      // 번역 버튼은 서버를 곧장 대화 번역(영어→한국어) 모드로 연다 (백엔드 mode 지원 필요)
-      mode: feature === 'translate' ? 'dialog' : undefined,
-      onEvent: handleVoiceEvent,
-    })
+  // 호출어 대기 상태로 복귀. 세션이 열리는 중이면 어차피 idle로 시작하므로 예약만 취소한다.
+  function requestSleep() {
+    if (voiceCtrl.current) voiceCtrl.current.sleep()
+    else pendingWakeRef.current = null
   }
 
-  // 헤더 마이크 토글: 서버 자유 라우팅 세션 시작/정지
+  // 헤더 마이크 토글: 호출어를 부르는 대신 눌러서 바로 명령을 말한다.
+  // 세션 자체는 계속 열려 있으므로 서버 상태(idle ↔ listening)만 오간다.
   function toggleVoice() {
-    if (listening) stopVoice()
-    else startVoice(null)
+    voiceFeatureRef.current = null // 어떤 기능이 올지 모르는 자유 라우팅
+    wakeByButtonRef.current = false
+    if (listening) {
+      requestSleep()
+      return
+    }
+    setVoiceCaption(null)
+    setCommandError(null)
+    requestWake()
   }
 
   // 마지막 음성 명령이 지금 열려 있는 오버레이의 것일 때만 그 값을 넘긴다.
@@ -411,7 +422,7 @@ export default function Simulation() {
 
             {/* 상단 상태 칩 */}
             <span className="pointer-events-none absolute left-4 top-4 z-30 rounded-full bg-navy-deep/70 px-3 py-1 font-mono text-[11px] text-white/70 backdrop-blur">
-              {activeFeature ? FEATURE_LABEL[activeFeature] : '대기 중'}
+              {activeFeature ? FEATURE_LABEL[activeFeature] : listening ? '명령 대기 중' : '호출어 대기 중'}
             </span>
 
             {/* 기능별 오버레이 (FR-SYS-2) — activeFeature 에 따라 하나만 렌더 */}
@@ -437,11 +448,14 @@ export default function Simulation() {
             )}
             {activeFeature === 'qa' && <QaOverlay question={commandText} error={activeError} />}
 
-            {/* 음성 인식 라이브 자막 (dialog 모드는 번역 오버레이가 대신 표시) */}
-            {listening && !dialogActive && (
+            {/* 음성 인식 라이브 자막 (dialog 모드는 번역 오버레이가 대신 표시).
+                호출어 대기(idle) 중에는 띄우지 않되, 연결·마이크 실패는 그때도 알려준다 */}
+            {!dialogActive && (listening || voiceCaption?.error) && (
               <div className="pointer-events-none absolute inset-x-0 top-14 z-30 flex justify-center px-6">
                 <div className="hud-chip max-w-lg text-center">
-                  <span className="eyebrow text-sky/70">음성 인식 중…</span>
+                  <span className="eyebrow text-sky/70">
+                    {listening ? '음성 인식 중…' : '음성 인식'}
+                  </span>
                   {voiceCaption?.error ? (
                     <p className="mt-1 text-sm text-white/70">{voiceCaption.error}</p>
                   ) : (

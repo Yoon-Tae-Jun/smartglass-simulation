@@ -68,25 +68,31 @@ function normalizeStt(res) {
     return { kind: 'error', status: res?.status ?? 0, msg: res?.msg ?? '알 수 없는 오류' }
   }
   const d = res.data ?? {}
-  // type 있으면 인식 이벤트(partial|final|wake|status|capture). status는 command↔dialog 모드 전환,
+  // type 있으면 인식 이벤트(partial|final|wake|status|capture). mode에 현재 세션 상태
+  // (idle=호출어 대기 / listening=명령 수신 / dialog=대화 번역)가 실려 온다.
   // dialog 모드의 partial|final은 translated(번역문)를 함께 싣는다.
   // capture는 "지금 화면을 찍어 보내라"는 요청 — 3초 안에 sendFrame()으로 답해야 한다.
   if (d.type) {
-    return { kind: d.type, feature: d.feature ?? null, text: d.text, translated: d.translated ?? null }
+    return {
+      kind: d.type,
+      feature: d.feature ?? null,
+      text: d.text,
+      translated: d.translated ?? null,
+      mode: d.mode ?? null,
+    }
   }
   return { kind: 'result', feature: d.feature, text: d.text, data: d.data }
 }
 
 // 마이크 오디오를 16kHz PCM으로 서버에 스트리밍하고, 서버가 보내는
 // 인식 자막 / 명령어 감지(wake) / 기능 실행 결과를 onEvent로 흘려보낸다.
+// 화면에 들어온 순간 한 번 열어 두고 계속 유지하는 세션이다. 서버는 호출어("헤이 글래스")를
+// 들을 때까지 idle 상태로 아무것도 내보내지 않고, 호출어를 들으면 listening으로 바뀐다.
 // location: 현재 위치 좌표 { lat, lng } — 목적지만 말했을 때 navigate 출발지로
 //   쓰인다(서버가 도로명 주소로 역변환).
-// mode: 'dialog'면 서버가 처음부터 대화 번역 모드(영어→한국어)로 시작한다.
-//   (미지정=command 모드, 서버가 말로 트리거될 때까지 한국어 명령 인식)
-// 반환값 .stop() 으로 종료.
-export function startVoiceCommand({ location, language = 'ko', mode, execute = true, onEvent }) {
+// 반환값 .wake()/.sleep() 으로 호출어 없이 상태를 바꾸고, .stop() 으로 종료.
+export function startVoiceCommand({ location, language = 'ko', execute = true, onEvent }) {
   const params = new URLSearchParams({ language, execute: String(execute) })
-  if (mode) params.set('mode', mode)
   // 서버는 lat/lng가 둘 다 있어야 현재 위치로 인정한다
   if (location?.lat != null && location?.lng != null) {
     params.set('lat', String(location.lat))
@@ -97,6 +103,7 @@ export function startVoiceCommand({ location, language = 'ko', mode, execute = t
   ws.binaryType = 'arraybuffer'
 
   let ctx = null, stream = null, proc = null, mute = null, closed = false
+  const queued = [] // 아직 연결 중일 때 호출된 제어 메시지 (열린 직후에 보낸다)
 
   function cleanup() {
     if (closed) return // stop()과 ws.onclose가 둘 다 부를 수 있어 한 번만 실행
@@ -117,6 +124,9 @@ export function startVoiceCommand({ location, language = 'ko', mode, execute = t
   ws.onclose = () => cleanup()
 
   ws.onopen = async () => {
+    // 마이크 권한을 기다리기 전에 먼저 흘려보낸다 (상태 전환은 오디오가 필요 없다)
+    queued.splice(0).forEach((payload) => send(payload))
+
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     } catch (e) {
@@ -140,21 +150,40 @@ export function startVoiceCommand({ location, language = 'ko', mode, execute = t
     }
   }
 
+  function send(payload) {
+    if (closed) return false
+    // 아직 연결 중(0)이면 버린 것처럼 보이지 않게 모아두고 onopen에서 보낸다
+    if (ws.readyState === 0) {
+      queued.push(payload)
+      return true
+    }
+    if (ws.readyState !== 1) return false
+    try {
+      ws.send(JSON.stringify(payload))
+      return true
+    } catch {
+      return false
+    }
+  }
+
   return {
     // capture 이벤트에 대한 응답 — 방금 찍은 화면을 서버로 보낸다(data URL 그대로 OK).
     // 서버는 3초만 기다리므로 capture를 받은 즉시 호출해야 한다.
     sendFrame(image) {
-      if (ws.readyState !== 1) return false
-      try {
-        ws.send(JSON.stringify({ action: 'frame', image }))
-        return true
-      } catch {
-        return false
-      }
+      return send({ action: 'frame', image })
+    },
+    // 기능 버튼을 눌렀을 때 — 호출어를 건너뛰고 바로 명령 수신 상태로 넘긴다.
+    // mode='dialog'면 대화 번역 모드(영어→한국어)로 곧장 들어간다.
+    wake(mode) {
+      return send(mode ? { action: 'wake', mode } : { action: 'wake' })
+    },
+    // 기능을 껐을 때 — 타임아웃을 기다리지 않고 호출어 대기 상태로 되돌린다.
+    sleep() {
+      return send({ action: 'sleep' })
     },
     stop() {
       if (ws.readyState === 1) {
-        try { ws.send(JSON.stringify({ action: 'stop' })) } catch { /* noop */ }
+        send({ action: 'stop' })
         ws.close()
       }
       cleanup()
