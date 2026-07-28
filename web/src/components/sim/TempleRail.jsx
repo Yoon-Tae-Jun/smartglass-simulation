@@ -6,8 +6,9 @@
 //   side      'left' | 'right'  — 좌/우 대칭 스타일
 //   features  [{ key, label, icon }]  — 이 다리에 올릴 기능들
 //   active    현재 활성 기능 key (없으면 null)
+//   listening 음성인식 진행 중 여부 — 활성 버튼에 인식 표시를 띄운다
 //   onToggle  (key) => void
-export default function TempleRail({ side, features, active, onToggle }) {
+export default function TempleRail({ side, features, active, listening, onToggle }) {
   const isLeft = side === 'left'
   return (
     <aside
@@ -21,6 +22,7 @@ export default function TempleRail({ side, features, active, onToggle }) {
 
       {features.map((f) => {
         const on = active === f.key
+        const live = on && listening // 이 기능이 활성이고 음성인식 중
         return (
           <button
             key={f.key}
@@ -28,8 +30,15 @@ export default function TempleRail({ side, features, active, onToggle }) {
             onClick={() => onToggle(f.key)}
             aria-pressed={on}
             title={f.label}
-            className={`temple-btn ${on ? 'temple-btn--on' : ''} flex h-16 w-16 flex-col items-center justify-center gap-1 rounded-2xl`}
+            className={`temple-btn ${on ? 'temple-btn--on' : ''} ${live ? 'glow-pulse' : ''} relative flex h-16 w-16 flex-col items-center justify-center gap-1 rounded-2xl`}
           >
+            {/* 음성인식 표시 — 우상단에서 깜빡이는 점 */}
+            {live && (
+              <span className="absolute right-2 top-2 flex h-2 w-2" aria-hidden="true">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-bright/70" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-sky-bright" />
+              </span>
+            )}
             <span className="text-xl leading-none">{f.icon}</span>
             <span
               className={`text-[10px] font-medium leading-tight ${on ? 'text-sky-bright' : 'text-white/70'}`}
