@@ -8,7 +8,8 @@ from schemas.map import Coordinate
 class CommandContext(BaseModel):
     text: str  # 음성에서 인식된 문장
     location: Optional[Coordinate] = None  # 현재 위치 좌표, navigate에서 출발지로 사용
-    # 기능이 추가되면 여기에 필드를 늘린다 (예: image: bytes - 이미지 인식용)
+    image: Optional[str] = None  # 클라이언트가 보낸 카메라 프레임(base64), image에서 사용
+    # 기능이 추가되면 여기에 필드를 늘린다
 
 
 class CommandResult(BaseModel):

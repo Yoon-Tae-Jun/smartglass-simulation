@@ -2,8 +2,9 @@
 # service.py는 이 판정 결과로 세션 모드만 바꾼다 (판정 로직은 여기 말고 두지 않는다)
 
 # 명령어 → 기능 매핑 (순서 중요: 구체적인 것 먼저, qa는 마지막 fallback)
-# 번역/통역은 여기 없다 — is_dialog_start()가 먼저 잡아 dialog 모드로 보낸다
+# 사람과의 대화 번역(통역)은 여기 없다 — is_dialog_start()가 먼저 잡아 dialog 모드로 보낸다
 KEYWORDS = {
+    "image":     ["메뉴판", "간판", "표지판", "이미지 번역", "사진 번역", "화면 번역"],
     "navigate":  ["안내", "경로", "까지", "가는 길", "어떻게 가", "길 알려"],
     "exchange":  ["환율", "환전", "얼마", "가격", "원으로"],
     "qa":        ["알려줘", "뭐야", "궁금", "찾아", "설명", "질문"],
@@ -27,6 +28,11 @@ def detect_feature(text: str):
 
 def is_dialog_start(text: str) -> bool:
     """'번역해줘', '외국인과 대화 번역해줘' 같은 대화 번역 시작 명령인지 판단."""
+    # "메뉴판 번역해줘"처럼 눈앞의 글자를 가리키는 말은 이미지 번역이 먼저다
+    # (여기서 걸러야 사람과의 대화 번역 모드로 잘못 들어가지 않는다)
+    if detect_feature(text) == "image":
+        return False
+
     t = text.replace(" ", "")
     return any(k in t for k in DIALOG_START_KEYWORDS)
 

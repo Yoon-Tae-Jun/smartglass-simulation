@@ -14,10 +14,12 @@ handle_command()가 등록된 핸들러를 자동으로 찾아 실행하므로 �
 import re
 from typing import Callable, Dict, Optional, Union
 
+from modules.imgPapago.service import translate_image
 from modules.map.service import get_directions, reverse_geocode
 from modules.stt.service import detect_command
 from schemas.base import BaseResponse
 from schemas.command import CommandContext, CommandResult
+from schemas.imgpapago import ImageTranslationRequest
 from schemas.map import Coordinate, DirectionsRequest
 from schemas.stt import CommandData
 from utils.errors import error_response, success_response
@@ -154,6 +156,32 @@ def resolve_origin(
     return error_response(400, "출발지를 알 수 없습니다. 현재 위치 좌표를 함께 전달해주세요")
 
 
+# ------------------------------------------------------------------- image --
+
+"""
+이미지 번역 기능: 클라이언트가 보낸 카메라 프레임의 글자를 번역하는 함수
+
+음성에는 이미지가 없으므로, 명령이 잡힌 순간 stt 라우터가 클라이언트에 capture를 요청해
+받아온 프레임을 넘겨준다. 그 요청에 응답이 없으면 이미지 없이 들어온다.
+
+PARAMS:
+- context: 인식 문장 + 카메라 프레임(base64)
+
+RETURN:
+- BaseResponse[ImageTranslationData]: status=200이면 data에 번역 이미지/원문/번역문,
+  실패하면 status/msg에 원인
+"""
+@feature("image")
+def image_translate(context: CommandContext) -> BaseResponse:
+    # capture 요청에 클라이언트가 응답하지 않은 경우
+    if not context.image:
+        return error_response(
+            400, '카메라 화면을 받지 못했습니다. capture 요청에 {"action": "frame"}으로 응답해주세요'
+        )
+
+    return translate_image(ImageTranslationRequest(image=context.image))
+
+
 # ---------------------------------------------------------------- dispatch --
 
 """
@@ -163,12 +191,15 @@ PARAMS:
   - CommandData: WebSocket wake 이벤트처럼 기능까지 판별된 경우 그대로 전달
   - str: 문장만 있는 경우, stt의 detect_command로 기능을 판별한 뒤 실행
 - location: 클라이언트가 보낸 현재 위치 좌표, 길찾기에서 출발지로 사용
+- image: 클라이언트가 보낸 카메라 프레임(base64), 이미지 번역에서 사용
 
 RETURN:
 - BaseResponse[CommandResult]: status=200이면 data에 실행한 기능/결과, 실패하면 status/msg에 원인
 """
 def handle_command(
-    command: Union[CommandData, str], location: Optional[Coordinate] = None
+    command: Union[CommandData, str],
+    location: Optional[Coordinate] = None,
+    image: Optional[str] = None,
 ) -> BaseResponse[CommandResult]:
     # 문장만 넘어온 경우 기능 판별은 stt 모듈에 맡긴다
     if isinstance(command, str):
@@ -186,7 +217,9 @@ def handle_command(
     if handler is None:
         return error_response(501, f"아직 지원하지 않는 기능입니다: {command.feature}")
 
-    handler_result = handler(CommandContext(text=command.text, location=location))
+    handler_result = handler(
+        CommandContext(text=command.text, location=location, image=image)
+    )
     if handler_result.status != 200:
         return handler_result
 
