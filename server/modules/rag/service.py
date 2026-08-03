@@ -13,7 +13,7 @@ RAG_URL = os.environ["RAG_URL"]
 
 
 """
-서울 관광지/맛집 질문을 별도 RAG 서버(RAG_API.md)에 위임해서 답을 받아오는 함수
+서울 관광지/맛집 질문을 별도 RAG 서버(rag/API.md)에 위임해서 답을 받아오는 함수
 PARAMS:
 - request: 사용자의 질문
 
